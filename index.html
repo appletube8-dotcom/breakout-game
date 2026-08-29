@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#090a0f">
+  <title>Космический Брейкаут</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-wrap">
+    <div id="hud">
+      <div class="hud-item">Счёт: <span id="score">0</span></div>
+      <div class="hud-item">Уровень: <span id="level">1</span></div>
+      <div class="hud-item">Жизни: <span id="lives">3</span></div>
+      <div class="hud-item">Рекорд: <span id="best">0</span></div>
+      <button id="muteBtn" title="Звук">🔊</button>
+    </div>
+    <canvas id="game" width="800" height="600"></canvas>
+    <div id="overlay">
+      <h1>Космический Брейкаут</h1>
+      <p>Отбей все космические точки!</p>
+      <button id="startBtn">Поехали</button>
+      <p class="hint">Управление: ← → / A / D • на телефоне веди пальцем</p>
+    </div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
