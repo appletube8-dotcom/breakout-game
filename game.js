@@ -1,4 +1,4 @@
-const canvas = document.getElementById("gameCanvas");
+const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 const scoreEl = document.getElementById("score");
@@ -14,10 +14,10 @@ const startBtn = document.getElementById("startBtn");
 const developerBtn = document.getElementById("developerBtn");
 
 const devPanel = document.getElementById("devPanel");
-const devLevel = document.getElementById("devLevel");
-const devLoad = document.getElementById("devLoad");
-const devPrev = document.getElementById("devPrev");
-const devNext = document.getElementById("devNext");
+const devLevel = document.getElementById("devLevelInput");
+const devLoad = document.getElementById("devLoadLevel");
+const devPrev = document.getElementById("devPrevLevel");
+const devNext = document.getElementById("devNextLevel");
 const devRestart = document.getElementById("devRestart");
 const devSkip = document.getElementById("devSkip");
 
@@ -29,6 +29,7 @@ const devBossFrequency = document.getElementById("devBossFrequency");
 const devExit = document.getElementById("devExit");
 
 const buffsWrap = document.getElementById("buffsWrap");
+const muteBtn = document.getElementById("muteBtn");
 
 canvas.width = 800;
 canvas.height = 600;
@@ -45,9 +46,18 @@ function initAudio() {
     if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
+
+    if (audioCtx.state === "suspended") {
+        audioCtx.resume();
+    }
 }
 
-function beep(freq = 440, duration = 0.05, type = "square", volume = 0.03) {
+function beep(
+    freq = 440,
+    duration = 0.05,
+    type = "square",
+    volume = 0.03
+) {
     if (muted) return;
 
     try {
@@ -59,7 +69,11 @@ function beep(freq = 440, duration = 0.05, type = "square", volume = 0.03) {
         osc.type = type;
         osc.frequency.value = freq;
 
-        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+        gain.gain.setValueAtTime(
+            volume,
+            audioCtx.currentTime
+        );
+
         gain.gain.exponentialRampToValueAtTime(
             0.001,
             audioCtx.currentTime + duration
@@ -69,13 +83,15 @@ function beep(freq = 440, duration = 0.05, type = "square", volume = 0.03) {
         gain.connect(audioCtx.destination);
 
         osc.start();
-        osc.stop(audioCtx.currentTime + duration);
+        osc.stop(
+            audioCtx.currentTime + duration
+        );
     } catch (e) {}
 }
 
 
 /* =========================================================
-   GAME STATE
+   STATE
 ========================================================= */
 
 const state = {
@@ -83,10 +99,10 @@ const state = {
     score: 0,
     level: 1,
     lives: 3,
-    best: Number(localStorage.getItem("breakoutBest") || 0)
+    best: Number(
+        localStorage.getItem("breakoutBest") || 0
+    )
 };
-
-bestEl.textContent = state.best;
 
 let devMode = false;
 
@@ -100,7 +116,6 @@ const devConfig = {
 
 let currentPattern = null;
 let currentPatternName = "";
-
 let levelTransitionLock = false;
 
 
@@ -119,7 +134,7 @@ const brickColors = [
 
 
 /* =========================================================
-   PLAYER
+   PLATFORM
 ========================================================= */
 
 const platform = {
@@ -130,13 +145,12 @@ const platform = {
     h: 15,
     speed: 8,
     vx: 0,
-    fire: false,
-    fireTimer: 0
+    fire: false
 };
 
 
 /* =========================================================
-   OBJECT ARRAYS
+   ARRAYS
 ========================================================= */
 
 let balls = [];
@@ -147,7 +161,7 @@ let stars = [];
 
 
 /* =========================================================
-   POWER-UPS
+   POWERS
 ========================================================= */
 
 const powers = {
@@ -191,19 +205,22 @@ document.addEventListener("keydown", e => {
     ) {
         e.preventDefault();
 
+        initAudio();
+
         if (!state.running) {
-            if (devMode) {
-                startGame("developer", state.level);
-            } else {
-                startGame("player", state.level);
-            }
+            startGame(
+                devMode
+                    ? "developer"
+                    : "player",
+                state.level
+            );
         }
 
-        balls.forEach(ball => {
+        for (const ball of balls) {
             if (ball.stuck) {
                 ball.stuck = false;
             }
-        });
+        }
     }
 });
 
@@ -224,7 +241,8 @@ document.addEventListener("keyup", e => {
 });
 
 canvas.addEventListener("mousemove", e => {
-    const rect = canvas.getBoundingClientRect();
+    const rect =
+        canvas.getBoundingClientRect();
 
     mouseX =
         (e.clientX - rect.left) *
@@ -235,42 +253,63 @@ canvas.addEventListener("click", () => {
     initAudio();
 
     if (!state.running) {
-        startGame(devMode ? "developer" : "player", state.level);
+        startGame(
+            devMode
+                ? "developer"
+                : "player",
+            state.level
+        );
     }
 
-    balls.forEach(ball => {
+    for (const ball of balls) {
         if (ball.stuck) {
             ball.stuck = false;
         }
-    });
+    }
 });
 
-canvas.addEventListener("touchstart", e => {
-    e.preventDefault();
+canvas.addEventListener(
+    "touchstart",
+    e => {
+        e.preventDefault();
 
-    initAudio();
+        initAudio();
 
-    if (!state.running) {
-        startGame(devMode ? "developer" : "player", state.level);
-    }
-
-    balls.forEach(ball => {
-        if (ball.stuck) {
-            ball.stuck = false;
+        if (!state.running) {
+            startGame(
+                devMode
+                    ? "developer"
+                    : "player",
+                state.level
+            );
         }
-    });
-}, { passive: false });
 
-canvas.addEventListener("touchmove", e => {
-    e.preventDefault();
+        for (const ball of balls) {
+            if (ball.stuck) {
+                ball.stuck = false;
+            }
+        }
+    },
+    { passive: false }
+);
 
-    const rect = canvas.getBoundingClientRect();
-    const touch = e.touches[0];
+canvas.addEventListener(
+    "touchmove",
+    e => {
+        e.preventDefault();
 
-    mouseX =
-        (touch.clientX - rect.left) *
-        (canvas.width / rect.width);
-}, { passive: false });
+        const rect =
+            canvas.getBoundingClientRect();
+
+        const touch =
+            e.touches[0];
+
+        mouseX =
+            (touch.clientX - rect.left) *
+            (canvas.width / rect.width);
+    },
+    { passive: false }
+);
 
 
 /* =========================================================
@@ -295,7 +334,7 @@ createStars();
 
 
 /* =========================================================
-   LEVEL PATTERNS
+   PATTERNS
 ========================================================= */
 
 const PATTERNS = [
@@ -462,21 +501,26 @@ const PATTERNS = [
 
 
 /* =========================================================
-   LEVEL HELPERS
+   LEVEL GENERATION
 ========================================================= */
 
 function getPatternForLevel(level) {
-    const index = (level - 1) % PATTERNS.length;
-    return PATTERNS[index];
+    return PATTERNS[
+        (level - 1) % PATTERNS.length
+    ];
 }
 
 function getBrickHP(level, row, col) {
     let hp = 1;
 
-    if (level >= 4) hp = 2;
-    if (level >= 8) hp = 3;
+    if (level >= 4) {
+        hp = 2;
+    }
 
-    // Central bricks become stronger on higher levels.
+    if (level >= 8) {
+        hp = 3;
+    }
+
     const centerCol = 5.5;
     const centerRow = 4.5;
 
@@ -484,14 +528,24 @@ function getBrickHP(level, row, col) {
         Math.abs(col - centerCol) +
         Math.abs(row - centerRow);
 
-    if (level >= 6 && distance < 4) {
+    if (
+        level >= 6 &&
+        distance < 4
+    ) {
         hp++;
     }
 
     return Math.min(hp, 3);
 }
 
-function createBrick(x, y, w, h, hp, colorIndex) {
+function createBrick(
+    x,
+    y,
+    w,
+    h,
+    hp,
+    colorIndex
+) {
     bricks.push({
         x,
         y,
@@ -499,29 +553,27 @@ function createBrick(x, y, w, h, hp, colorIndex) {
         h,
         hp,
         maxHp: hp,
-        colorIndex: colorIndex % brickColors.length,
+        colorIndex:
+            colorIndex % brickColors.length,
         alive: true
     });
 }
-
-
-/* =========================================================
-   BUILD LEVEL
-========================================================= */
 
 function buildLevel(level) {
     bricks = [];
     bonuses = [];
     particles = [];
 
-    currentPattern = getPatternForLevel(level);
-    currentPatternName = currentPattern.name;
+    currentPattern =
+        getPatternForLevel(level);
 
-    const grid = currentPattern.grid;
+    currentPatternName =
+        currentPattern.name;
+
+    const grid =
+        currentPattern.grid;
 
     const cols = 12;
-    const rows = grid.length;
-
     const brickW = 54;
     const brickH = 21;
     const gap = 6;
@@ -535,17 +587,34 @@ function buildLevel(level) {
 
     const startY = 72;
 
-    for (let row = 0; row < rows; row++) {
+    for (
+        let row = 0;
+        row < grid.length;
+        row++
+    ) {
         const line = grid[row];
 
-        for (let col = 0; col < cols; col++) {
-            if (line[col] !== "#") continue;
+        for (
+            let col = 0;
+            col < cols;
+            col++
+        ) {
+            if (line[col] !== "#") {
+                continue;
+            }
 
-            const hp = getBrickHP(level, row, col);
+            const hp =
+                getBrickHP(
+                    level,
+                    row,
+                    col
+                );
 
             createBrick(
-                startX + col * (brickW + gap),
-                startY + row * (brickH + gap),
+                startX +
+                    col * (brickW + gap),
+                startY +
+                    row * (brickH + gap),
                 brickW,
                 brickH,
                 hp,
@@ -557,22 +626,21 @@ function buildLevel(level) {
     resetPlatform();
     resetBalls();
 
+    levelTransitionLock = false;
+
     updateHUD();
 }
 
 
 /* =========================================================
-   PLATFORM
+   PLATFORM RESET
 ========================================================= */
 
 function resetPlatform() {
-    platform.baseW = 120;
-
-    if (powers.big > 0) {
-        platform.w = 180;
-    } else {
-        platform.w = platform.baseW;
-    }
+    platform.w =
+        powers.big > 0
+            ? 180
+            : platform.baseW;
 
     platform.x =
         (canvas.width - platform.w) / 2;
@@ -580,22 +648,28 @@ function resetPlatform() {
     platform.y = 550;
     platform.vx = 0;
 
-    platform.fire = powers.fire > 0;
+    platform.fire =
+        powers.fire > 0;
 }
 
 
 /* =========================================================
-   BALLS
+   BALL
 ========================================================= */
 
-function createBall(x, y, dx, dy, stuck = false) {
+function createBall(
+    x,
+    y,
+    dx,
+    dy,
+    stuck = false
+) {
     return {
         x,
         y,
         r: 7,
         dx,
         dy,
-        speed: 5.5,
         stuck,
         trail: []
     };
@@ -604,7 +678,8 @@ function createBall(x, y, dx, dy, stuck = false) {
 function resetBalls() {
     balls = [
         createBall(
-            platform.x + platform.w / 2,
+            platform.x +
+                platform.w / 2,
             platform.y - 10,
             0,
             -5.5,
@@ -615,23 +690,35 @@ function resetBalls() {
 
 
 /* =========================================================
-   GAME START
+   START
 ========================================================= */
 
-function startGame(mode = "player", level = 1) {
+function startGame(
+    mode = "player",
+    level = 1
+) {
     initAudio();
 
-    devMode = mode === "developer";
+    devMode =
+        mode === "developer";
 
     state.running = true;
-    state.level = Math.max(1, Number(level) || 1);
+    state.level =
+        Math.max(
+            1,
+            Math.floor(
+                Number(level) || 1
+            )
+        );
 
     state.score = 0;
 
     if (devMode) {
         state.lives =
-            devConfig.infiniteLives ||
-            devConfig.godMode
+            (
+                devConfig.infiniteLives ||
+                devConfig.godMode
+            )
                 ? Infinity
                 : 3;
     } else {
@@ -644,23 +731,40 @@ function startGame(mode = "player", level = 1) {
     powers.slow = 0;
 
     overlay.style.display = "none";
-    devPanel.style.display = devMode ? "block" : "none";
+
+    if (devMode) {
+        devPanel.classList.remove("hidden");
+        devPanel.style.display = "block";
+    } else {
+        devPanel.classList.add("hidden");
+        devPanel.style.display = "none";
+    }
+
+    devLevel.value =
+        state.level;
 
     buildLevel(state.level);
     updateBuffs();
+    updateHUD();
 }
 
 
 /* =========================================================
-   DEVELOPER LEVEL
+   DEVELOPER
 ========================================================= */
 
 function loadDeveloperLevel(level) {
     if (!devMode) return;
 
-    level = Math.max(1, Math.floor(Number(level) || 1));
+    const newLevel =
+        Math.max(
+            1,
+            Math.floor(
+                Number(level) || 1
+            )
+        );
 
-    state.level = level;
+    state.level = newLevel;
 
     if (
         devConfig.infiniteLives ||
@@ -668,6 +772,9 @@ function loadDeveloperLevel(level) {
     ) {
         state.lives = Infinity;
     }
+
+    devLevel.value =
+        state.level;
 
     buildLevel(state.level);
     updateHUD();
@@ -684,40 +791,64 @@ function skipLevel() {
 
     state.level++;
 
+    devLevel.value =
+        state.level;
+
     buildLevel(state.level);
 }
 
 
 /* =========================================================
-   LEVEL COMPLETE
+   COMPLETE LEVEL
 ========================================================= */
 
 function checkLevelComplete() {
-    if (levelTransitionLock) return;
+    if (levelTransitionLock) {
+        return;
+    }
 
-    const alive = bricks.some(brick => brick.alive);
+    const alive =
+        bricks.some(
+            brick => brick.alive
+        );
 
     if (alive) return;
 
     levelTransitionLock = true;
 
-    beep(880, 0.12, "sine", 0.05);
-    beep(1100, 0.16, "sine", 0.04);
+    beep(
+        880,
+        0.12,
+        "sine",
+        0.05
+    );
 
-    state.score += 500 + state.level * 50;
+    beep(
+        1100,
+        0.16,
+        "sine",
+        0.04
+    );
+
+    state.score +=
+        500 +
+        state.level * 50;
 
     setTimeout(() => {
         state.level++;
 
-        buildLevel(state.level);
+        if (devMode) {
+            devLevel.value =
+                state.level;
+        }
 
-        levelTransitionLock = false;
+        buildLevel(state.level);
     }, 700);
 }
 
 
 /* =========================================================
-   PLAYER DEATH
+   LOSE BALL
 ========================================================= */
 
 function loseBall() {
@@ -753,64 +884,83 @@ function gameOver() {
     state.running = false;
 
     if (state.score > state.best) {
-        state.best = state.score;
+        state.best =
+            state.score;
+
         localStorage.setItem(
             "breakoutBest",
             state.best
         );
     }
 
-    bestEl.textContent = state.best;
+    updateHUD();
 
-    overlayTitle.textContent = "GAME OVER";
+    overlayTitle.textContent =
+        "GAME OVER";
+
     overlaySubtitle.textContent =
-        `Score: ${state.score}`;
+        `Счёт: ${state.score}`;
 
-    startBtn.textContent = "PLAY AGAIN";
-    developerBtn.textContent = "DEVELOPER MODE";
+    startBtn.textContent =
+        "🎮 Играть снова";
 
-    overlay.style.display = "flex";
+    developerBtn.textContent =
+        "🛠 Developer";
+
+    overlay.style.display =
+        "flex";
 }
 
 
 /* =========================================================
-   UPDATE PLATFORM
+   PLATFORM UPDATE
 ========================================================= */
 
 function updatePlatform(dt) {
     platform.vx = 0;
 
     if (keys.left) {
-        platform.vx = -platform.speed;
+        platform.vx =
+            -platform.speed;
     }
 
     if (keys.right) {
-        platform.vx = platform.speed;
+        platform.vx =
+            platform.speed;
     }
 
     if (mouseX !== null) {
         const target =
-            mouseX - platform.w / 2;
+            mouseX -
+            platform.w / 2;
 
         platform.x +=
-            (target - platform.x) * 0.18;
+            (
+                target -
+                platform.x
+            ) * 0.18;
     } else {
-        platform.x += platform.vx * dt;
+        platform.x +=
+            platform.vx * dt;
     }
 
-    platform.x = Math.max(
-        0,
-        Math.min(
-            canvas.width - platform.w,
-            platform.x
-        )
-    );
+    platform.x =
+        Math.max(
+            0,
+            Math.min(
+                canvas.width -
+                    platform.w,
+                platform.x
+            )
+        );
 
-    if (powers.big <= 0) {
-        platform.w = platform.baseW;
-    } else {
-        platform.w = 180;
-    }
+    platform.w =
+        powers.big > 0
+            ? 180
+            : platform.baseW;
+
+    platform.fire =
+        powers.fire > 0;
 }
 
 
@@ -829,7 +979,7 @@ function updateBall(ball, dt) {
             ball.r -
             2;
 
-        return;
+        return true;
     }
 
     ball.trail.push({
@@ -841,40 +991,85 @@ function updateBall(ball, dt) {
         ball.trail.shift();
     }
 
-    ball.x += ball.dx * dt;
-    ball.y += ball.dy * dt;
+    ball.x +=
+        ball.dx * dt;
 
-    // Walls
-    if (ball.x - ball.r <= 0) {
+    ball.y +=
+        ball.dy * dt;
+
+    // Left wall
+    if (
+        ball.x - ball.r <= 0
+    ) {
         ball.x = ball.r;
-        ball.dx = Math.abs(ball.dx);
-        beep(240, 0.025, "square", 0.02);
+        ball.dx =
+            Math.abs(ball.dx);
+
+        beep(
+            240,
+            0.025,
+            "square",
+            0.02
+        );
     }
 
-    if (ball.x + ball.r >= canvas.width) {
-        ball.x = canvas.width - ball.r;
-        ball.dx = -Math.abs(ball.dx);
-        beep(240, 0.025, "square", 0.02);
+    // Right wall
+    if (
+        ball.x + ball.r >=
+        canvas.width
+    ) {
+        ball.x =
+            canvas.width -
+            ball.r;
+
+        ball.dx =
+            -Math.abs(ball.dx);
+
+        beep(
+            240,
+            0.025,
+            "square",
+            0.02
+        );
     }
 
-    if (ball.y - ball.r <= 0) {
+    // Top wall
+    if (
+        ball.y - ball.r <= 0
+    ) {
         ball.y = ball.r;
-        ball.dy = Math.abs(ball.dy);
-        beep(260, 0.025, "square", 0.02);
+        ball.dy =
+            Math.abs(ball.dy);
+
+        beep(
+            260,
+            0.025,
+            "square",
+            0.02
+        );
     }
 
     // Bottom
-    if (ball.y - ball.r > canvas.height) {
+    if (
+        ball.y - ball.r >
+        canvas.height
+    ) {
         return false;
     }
 
-    // Platform collision
+    // Paddle
     if (
         ball.dy > 0 &&
-        ball.y + ball.r >= platform.y &&
-        ball.y - ball.r <= platform.y + platform.h &&
-        ball.x >= platform.x &&
-        ball.x <= platform.x + platform.w
+        ball.y + ball.r >=
+            platform.y &&
+        ball.y - ball.r <=
+            platform.y +
+            platform.h &&
+        ball.x >=
+            platform.x &&
+        ball.x <=
+            platform.x +
+            platform.w
     ) {
         ball.y =
             platform.y -
@@ -883,33 +1078,48 @@ function updateBall(ball, dt) {
         const hit =
             (
                 ball.x -
-                (platform.x + platform.w / 2)
+                (
+                    platform.x +
+                    platform.w / 2
+                )
             ) /
             (platform.w / 2);
 
         const angle =
-            hit * (Math.PI / 3);
+            hit *
+            (Math.PI / 3);
 
         const speed =
             Math.sqrt(
-                ball.dx * ball.dx +
-                ball.dy * ball.dy
+                ball.dx *
+                    ball.dx +
+                ball.dy *
+                    ball.dy
             );
 
         ball.dx =
-            Math.sin(angle) * speed;
+            Math.sin(angle) *
+            speed;
 
         ball.dy =
-            -Math.cos(angle) * speed;
+            -Math.cos(angle) *
+            speed;
 
-        if (Math.abs(ball.dy) < 2.2) {
+        if (
+            Math.abs(ball.dy) < 2.2
+        ) {
             ball.dy =
                 ball.dy < 0
                     ? -2.2
                     : 2.2;
         }
 
-        beep(520, 0.035, "square", 0.025);
+        beep(
+            520,
+            0.035,
+            "square",
+            0.025
+        );
 
         if (platform.fire) {
             createParticles(
@@ -926,15 +1136,25 @@ function updateBall(ball, dt) {
         if (!brick.alive) continue;
 
         if (
-            ball.x + ball.r > brick.x &&
-            ball.x - ball.r < brick.x + brick.w &&
-            ball.y + ball.r > brick.y &&
-            ball.y - ball.r < brick.y + brick.h
+            ball.x + ball.r >
+                brick.x &&
+            ball.x - ball.r <
+                brick.x + brick.w &&
+            ball.y + ball.r >
+                brick.y &&
+            ball.y - ball.r <
+                brick.y + brick.h
         ) {
-            handleBrickHit(ball, brick);
+            handleBrickHit(
+                ball,
+                brick
+            );
 
-            if (!powers.fire) {
-                resolveBrickBounce(ball, brick);
+            if (powers.fire <= 0) {
+                resolveBrickBounce(
+                    ball,
+                    brick
+                );
             }
 
             break;
@@ -946,23 +1166,38 @@ function updateBall(ball, dt) {
 
 
 /* =========================================================
-   BRICK COLLISION
+   BRICK BOUNCE
 ========================================================= */
 
-function resolveBrickBounce(ball, brick) {
+function resolveBrickBounce(
+    ball,
+    brick
+) {
     const overlapLeft =
-        ball.x + ball.r - brick.x;
+        ball.x +
+        ball.r -
+        brick.x;
 
     const overlapRight =
-        brick.x + brick.w -
-        (ball.x - ball.r);
+        brick.x +
+        brick.w -
+        (
+            ball.x -
+            ball.r
+        );
 
     const overlapTop =
-        ball.y + ball.r - brick.y;
+        ball.y +
+        ball.r -
+        brick.y;
 
     const overlapBottom =
-        brick.y + brick.h -
-        (ball.y - ball.r);
+        brick.y +
+        brick.h -
+        (
+            ball.y -
+            ball.r
+        );
 
     const minHorizontal =
         Math.min(
@@ -976,7 +1211,10 @@ function resolveBrickBounce(ball, brick) {
             overlapBottom
         );
 
-    if (minHorizontal < minVertical) {
+    if (
+        minHorizontal <
+        minVertical
+    ) {
         ball.dx *= -1;
     } else {
         ball.dy *= -1;
@@ -988,7 +1226,10 @@ function resolveBrickBounce(ball, brick) {
    BRICK HIT
 ========================================================= */
 
-function handleBrickHit(ball, brick) {
+function handleBrickHit(
+    ball,
+    brick
+) {
     brick.hp--;
 
     state.score +=
@@ -1000,54 +1241,62 @@ function handleBrickHit(ball, brick) {
         brick.alive = false;
 
         createParticles(
-            brick.x + brick.w / 2,
-            brick.y + brick.h / 2,
-            brickColors[brick.colorIndex],
+            brick.x +
+                brick.w / 2,
+            brick.y +
+                brick.h / 2,
+            brickColors[
+                brick.colorIndex
+            ],
             12
         );
 
         beep(
-            300 + brick.colorIndex * 70,
+            300 +
+                brick.colorIndex *
+                70,
             0.04,
             "square",
             0.025
         );
 
         maybeDropBonus(
-            brick.x + brick.w / 2,
-            brick.y + brick.h / 2
+            brick.x +
+                brick.w / 2,
+            brick.y +
+                brick.h / 2
         );
     } else {
         createParticles(
-            brick.x + brick.w / 2,
-            brick.y + brick.h / 2,
-            brickColors[brick.colorIndex],
+            brick.x +
+                brick.w / 2,
+            brick.y +
+                brick.h / 2,
+            brickColors[
+                brick.colorIndex
+            ],
             4
         );
 
         beep(
-            180 + brick.hp * 80,
+            180 +
+                brick.hp * 80,
             0.025,
             "square",
             0.02
         );
     }
-
-    // Fireball punches through bricks.
-    if (powers.fire > 0) {
-        ball.dy *= 0.995;
-    }
 }
 
 
 /* =========================================================
-   BONUS DROPS
+   BONUSES
 ========================================================= */
 
 function maybeDropBonus(x, y) {
-    const chance = 0.13;
-
-    if (Math.random() > chance) return;
+    if (Math.random() > 0.13) {
+        return;
+    }
 
     const types = [
         "big",
@@ -1075,29 +1324,44 @@ function maybeDropBonus(x, y) {
     });
 }
 
-
-/* =========================================================
-   BONUS UPDATE
-========================================================= */
-
 function updateBonuses(dt) {
-    for (let i = bonuses.length - 1; i >= 0; i--) {
-        const bonus = bonuses[i];
+    for (
+        let i = bonuses.length - 1;
+        i >= 0;
+        i--
+    ) {
+        const bonus =
+            bonuses[i];
 
-        bonus.y += bonus.vy * dt;
-        bonus.rotation += 0.04 * dt;
+        bonus.y +=
+            bonus.vy * dt;
+
+        bonus.rotation +=
+            0.04 * dt;
 
         if (
-            bonus.y + bonus.h >= platform.y &&
-            bonus.y <= platform.y + platform.h &&
-            bonus.x + bonus.w >= platform.x &&
-            bonus.x <= platform.x + platform.w
+            bonus.y +
+                bonus.h >=
+                platform.y &&
+            bonus.y <=
+                platform.y +
+                platform.h &&
+            bonus.x +
+                bonus.w >=
+                platform.x &&
+            bonus.x <=
+                platform.x +
+                platform.w
         ) {
-            activatePower(bonus.type);
+            activatePower(
+                bonus.type
+            );
 
             createParticles(
-                bonus.x + bonus.w / 2,
-                bonus.y + bonus.h / 2,
+                bonus.x +
+                    bonus.w / 2,
+                bonus.y +
+                    bonus.h / 2,
                 "#ffffff",
                 15
             );
@@ -1106,7 +1370,10 @@ function updateBonuses(dt) {
             continue;
         }
 
-        if (bonus.y > canvas.height + 40) {
+        if (
+            bonus.y >
+            canvas.height + 40
+        ) {
             bonuses.splice(i, 1);
         }
     }
@@ -1114,7 +1381,7 @@ function updateBonuses(dt) {
 
 
 /* =========================================================
-   ACTIVATE POWER
+   POWERS
 ========================================================= */
 
 function activatePower(type) {
@@ -1134,7 +1401,8 @@ function activatePower(type) {
 
     if (type === "multi") {
         if (balls.length < 5) {
-            const source = balls[0];
+            const source =
+                balls[0];
 
             if (source) {
                 balls.push(
@@ -1160,37 +1428,41 @@ function activatePower(type) {
         }
     }
 
-    if (type === "slow") {
-        // Timer handled by power state.
-    }
-
-    beep(900, 0.08, "sine", 0.04);
+    beep(
+        900,
+        0.08,
+        "sine",
+        0.04
+    );
 
     updateBuffs();
 }
 
-
-/* =========================================================
-   POWER TIMERS
-========================================================= */
-
 function updatePowers(dt) {
     let changed = false;
 
-    for (const key of Object.keys(powers)) {
+    for (
+        const key of Object.keys(
+            powers
+        )
+    ) {
         if (powers[key] > 0) {
             powers[key] -= dt;
             changed = true;
 
-            if (powers[key] <= 0) {
+            if (
+                powers[key] <= 0
+            ) {
                 powers[key] = 0;
 
                 if (key === "big") {
-                    platform.w = platform.baseW;
+                    platform.w =
+                        platform.baseW;
                 }
 
                 if (key === "fire") {
-                    platform.fire = false;
+                    platform.fire =
+                        false;
                 }
             }
         }
@@ -1218,16 +1490,27 @@ function updateBuffs() {
         slow: "SLOW"
     };
 
-    for (const key of Object.keys(powers)) {
-        if (powers[key] <= 0) continue;
+    for (
+        const key of Object.keys(
+            powers
+        )
+    ) {
+        if (powers[key] <= 0) {
+            continue;
+        }
 
-        const div = document.createElement("div");
+        const div =
+            document.createElement(
+                "div"
+            );
 
         div.className =
             `buff buff-${key}`;
 
         div.textContent =
-            `${labels[key]} ${Math.ceil(powers[key] / 60)}`;
+            `${labels[key]} ${Math.ceil(
+                powers[key] / 60
+            )}`;
 
         buffsWrap.appendChild(div);
     }
@@ -1238,10 +1521,20 @@ function updateBuffs() {
    PARTICLES
 ========================================================= */
 
-function createParticles(x, y, color, amount = 10) {
-    for (let i = 0; i < amount; i++) {
+function createParticles(
+    x,
+    y,
+    color,
+    amount = 10
+) {
+    for (
+        let i = 0;
+        i < amount;
+        i++
+    ) {
         const angle =
-            Math.random() * Math.PI * 2;
+            Math.random() *
+            Math.PI * 2;
 
         const speed =
             Math.random() * 3 + 1;
@@ -1249,29 +1542,45 @@ function createParticles(x, y, color, amount = 10) {
         particles.push({
             x,
             y,
-            vx: Math.cos(angle) * speed,
-            vy: Math.sin(angle) * speed,
+            vx:
+                Math.cos(angle) *
+                speed,
+            vy:
+                Math.sin(angle) *
+                speed,
             life: 1,
             decay:
-                Math.random() * 0.03 + 0.015,
+                Math.random() *
+                    0.03 +
+                0.015,
             size:
-                Math.random() * 3 + 1,
+                Math.random() * 3 +
+                1,
             color
         });
     }
 }
 
 function updateParticles(dt) {
-    for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
+    for (
+        let i = particles.length - 1;
+        i >= 0;
+        i--
+    ) {
+        const p =
+            particles[i];
 
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
+        p.x +=
+            p.vx * dt;
+
+        p.y +=
+            p.vy * dt;
 
         p.vx *= 0.98;
         p.vy *= 0.98;
 
-        p.life -= p.decay * dt;
+        p.life -=
+            p.decay * dt;
 
         if (p.life <= 0) {
             particles.splice(i, 1);
@@ -1285,7 +1594,9 @@ function updateParticles(dt) {
 ========================================================= */
 
 function drawBackground(time) {
-    ctx.fillStyle = "#050713";
+    ctx.fillStyle =
+        "#050713";
+
     ctx.fillRect(
         0,
         0,
@@ -1297,15 +1608,22 @@ function drawBackground(time) {
         const alpha =
             star.a +
             Math.sin(
-                time * star.speed
-            ) * 0.15;
+                time *
+                    star.speed
+            ) *
+                0.15;
 
         ctx.globalAlpha =
-            Math.max(0.05, alpha);
+            Math.max(
+                0.05,
+                alpha
+            );
 
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle =
+            "#ffffff";
 
         ctx.beginPath();
+
         ctx.arc(
             star.x,
             star.y,
@@ -1313,12 +1631,12 @@ function drawBackground(time) {
             0,
             Math.PI * 2
         );
+
         ctx.fill();
     }
 
     ctx.globalAlpha = 1;
 
-    // Subtle level pattern glow.
     const gradient =
         ctx.createRadialGradient(
             canvas.width / 2,
@@ -1339,7 +1657,8 @@ function drawBackground(time) {
         "rgba(0,0,0,0)"
     );
 
-    ctx.fillStyle = gradient;
+    ctx.fillStyle =
+        gradient;
 
     ctx.fillRect(
         0,
@@ -1359,14 +1678,18 @@ function drawBricks() {
         if (!brick.alive) continue;
 
         const color =
-            brickColors[brick.colorIndex];
+            brickColors[
+                brick.colorIndex
+            ];
 
         ctx.save();
 
         ctx.shadowBlur = 12;
-        ctx.shadowColor = color;
+        ctx.shadowColor =
+            color;
 
-        ctx.fillStyle = color;
+        ctx.fillStyle =
+            color;
 
         ctx.beginPath();
 
@@ -1389,7 +1712,6 @@ function drawBricks() {
 
         ctx.fill();
 
-        // Inner shine.
         ctx.shadowBlur = 0;
 
         ctx.fillStyle =
@@ -1402,18 +1724,22 @@ function drawBricks() {
             3
         );
 
-        // HP indicator.
         if (brick.maxHp > 1) {
             ctx.fillStyle =
                 "rgba(0,0,0,0.35)";
 
             const barW =
                 (brick.w - 8) *
-                (brick.hp / brick.maxHp);
+                (
+                    brick.hp /
+                    brick.maxHp
+                );
 
             ctx.fillRect(
                 brick.x + 4,
-                brick.y + brick.h - 5,
+                brick.y +
+                    brick.h -
+                    5,
                 barW,
                 2
             );
@@ -1429,21 +1755,34 @@ function drawBricks() {
 ========================================================= */
 
 function drawPlatform() {
-    const x = platform.x;
-    const y = platform.y;
-    const w = platform.w;
-    const h = platform.h;
+    const x =
+        platform.x;
+
+    const y =
+        platform.y;
+
+    const w =
+        platform.w;
+
+    const h =
+        platform.h;
 
     ctx.save();
 
     ctx.shadowBlur = 20;
 
     if (platform.fire) {
-        ctx.shadowColor = "#ff5a00";
-        ctx.fillStyle = "#ff7a00";
+        ctx.shadowColor =
+            "#ff5a00";
+
+        ctx.fillStyle =
+            "#ff7a00";
     } else {
-        ctx.shadowColor = "#00f5ff";
-        ctx.fillStyle = "#00d9ff";
+        ctx.shadowColor =
+            "#00f5ff";
+
+        ctx.fillStyle =
+            "#00d9ff";
     }
 
     ctx.beginPath();
@@ -1457,7 +1796,12 @@ function drawPlatform() {
             8
         );
     } else {
-        ctx.rect(x, y, w, h);
+        ctx.rect(
+            x,
+            y,
+            w,
+            h
+        );
     }
 
     ctx.fill();
@@ -1483,13 +1827,20 @@ function drawPlatform() {
 ========================================================= */
 
 function drawBall(ball) {
-    // Trail
-    for (let i = 0; i < ball.trail.length; i++) {
+    for (
+        let i = 0;
+        i < ball.trail.length;
+        i++
+    ) {
         const point =
             ball.trail[i];
 
         const alpha =
-            i / ball.trail.length * 0.25;
+            (
+                i /
+                ball.trail.length
+            ) *
+            0.25;
 
         ctx.fillStyle =
             `rgba(100,220,255,${alpha})`;
@@ -1510,7 +1861,9 @@ function drawBall(ball) {
     ctx.save();
 
     if (powers.fire > 0) {
-        ctx.shadowColor = "#ff5a00";
+        ctx.shadowColor =
+            "#ff5a00";
+
         ctx.shadowBlur = 25;
 
         const gradient =
@@ -1538,12 +1891,16 @@ function drawBall(ball) {
             "#ff3300"
         );
 
-        ctx.fillStyle = gradient;
+        ctx.fillStyle =
+            gradient;
     } else {
-        ctx.shadowColor = "#ffffff";
+        ctx.shadowColor =
+            "#ffffff";
+
         ctx.shadowBlur = 15;
 
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle =
+            "#ffffff";
     }
 
     ctx.beginPath();
@@ -1583,13 +1940,17 @@ function drawBonuses() {
         };
 
         const color =
-            colors[bonus.type];
+            colors[
+                bonus.type
+            ];
 
         ctx.save();
 
         ctx.translate(
-            bonus.x + bonus.w / 2,
-            bonus.y + bonus.h / 2
+            bonus.x +
+                bonus.w / 2,
+            bonus.y +
+                bonus.h / 2
         );
 
         ctx.rotate(
@@ -1597,11 +1958,14 @@ function drawBonuses() {
         );
 
         ctx.shadowBlur = 18;
-        ctx.shadowColor = color;
+        ctx.shadowColor =
+            color;
 
-        ctx.fillStyle = color;
+        ctx.fillStyle =
+            color;
 
         ctx.beginPath();
+
         ctx.arc(
             0,
             0,
@@ -1609,20 +1973,27 @@ function drawBonuses() {
             0,
             Math.PI * 2
         );
+
         ctx.fill();
 
         ctx.shadowBlur = 0;
 
-        ctx.fillStyle = "#07101c";
+        ctx.fillStyle =
+            "#07101c";
 
         ctx.font =
             "bold 12px Arial";
 
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
+        ctx.textAlign =
+            "center";
+
+        ctx.textBaseline =
+            "middle";
 
         ctx.fillText(
-            symbols[bonus.type],
+            symbols[
+                bonus.type
+            ],
             0,
             1
         );
@@ -1639,9 +2010,13 @@ function drawBonuses() {
 function drawParticles() {
     for (const p of particles) {
         ctx.globalAlpha =
-            Math.max(0, p.life);
+            Math.max(
+                0,
+                p.life
+            );
 
-        ctx.fillStyle = p.color;
+        ctx.fillStyle =
+            p.color;
 
         ctx.beginPath();
 
@@ -1661,7 +2036,7 @@ function drawParticles() {
 
 
 /* =========================================================
-   DEVELOPER OVERLAY
+   DEV INFO
 ========================================================= */
 
 function drawDeveloperInfo() {
@@ -1709,7 +2084,10 @@ function drawDeveloperInfo() {
 ========================================================= */
 
 function drawHitboxes() {
-    if (!devMode || !devConfig.showHitboxes) {
+    if (
+        !devMode ||
+        !devConfig.showHitboxes
+    ) {
         return;
     }
 
@@ -1784,16 +2162,21 @@ function updateHUD() {
 
 
 /* =========================================================
-   MAIN UPDATE
+   MAIN LOOP
 ========================================================= */
 
-let lastTime = performance.now();
+let lastTime =
+    performance.now();
 
 function update(time) {
     const rawDt =
         Math.min(
             2,
-            (time - lastTime) / 16.6667
+            (
+                time -
+                lastTime
+            ) /
+                16.6667
         );
 
     lastTime = time;
@@ -1846,12 +2229,11 @@ function update(time) {
 
 
 /* =========================================================
-   MAIN DRAW
+   DRAW
 ========================================================= */
 
 function draw(time) {
     drawBackground(time);
-
     drawBricks();
     drawBonuses();
     drawParticles();
@@ -1867,54 +2249,72 @@ function draw(time) {
 
 
 /* =========================================================
-   UI EVENTS
+   BUTTONS
 ========================================================= */
 
-startBtn.addEventListener("click", () => {
-    startGame("player", 1);
-});
+startBtn.addEventListener(
+    "click",
+    () => {
+        startGame(
+            "player",
+            1
+        );
+    }
+);
 
-developerBtn.addEventListener("click", () => {
-    startGame("developer", 1);
-});
+developerBtn.addEventListener(
+    "click",
+    () => {
+        startGame(
+            "developer",
+            1
+        );
+    }
+);
 
-devLoad.addEventListener("click", () => {
-    loadDeveloperLevel(
-        Number(devLevel.value)
-    );
-});
+devLoad.addEventListener(
+    "click",
+    () => {
+        loadDeveloperLevel(
+            devLevel.value
+        );
+    }
+);
 
-devPrev.addEventListener("click", () => {
-    loadDeveloperLevel(
-        Math.max(
-            1,
-            state.level - 1
-        )
-    );
+devPrev.addEventListener(
+    "click",
+    () => {
+        loadDeveloperLevel(
+            Math.max(
+                1,
+                state.level - 1
+            )
+        );
+    }
+);
 
-    devLevel.value =
-        state.level;
-});
+devNext.addEventListener(
+    "click",
+    () => {
+        loadDeveloperLevel(
+            state.level + 1
+        );
+    }
+);
 
-devNext.addEventListener("click", () => {
-    loadDeveloperLevel(
-        state.level + 1
-    );
+devRestart.addEventListener(
+    "click",
+    () => {
+        restartLevel();
+    }
+);
 
-    devLevel.value =
-        state.level;
-});
-
-devRestart.addEventListener("click", () => {
-    restartLevel();
-});
-
-devSkip.addEventListener("click", () => {
-    skipLevel();
-
-    devLevel.value =
-        state.level;
-});
+devSkip.addEventListener(
+    "click",
+    () => {
+        skipLevel();
+    }
+);
 
 
 /* =========================================================
@@ -1985,13 +2385,10 @@ devBossFrequency.addEventListener(
         const value =
             devBossFrequency.value;
 
-        if (value === "random") {
-            devConfig.bossFrequency =
-                "random";
-        } else {
-            devConfig.bossFrequency =
-                Number(value);
-        }
+        devConfig.bossFrequency =
+            value === "random"
+                ? "random"
+                : Number(value);
     }
 );
 
@@ -2000,10 +2397,17 @@ devExit.addEventListener(
     () => {
         devMode = false;
 
+        devPanel.classList.add(
+            "hidden"
+        );
+
         devPanel.style.display =
             "none";
 
-        startGame("player", 1);
+        startGame(
+            "player",
+            1
+        );
     }
 );
 
@@ -2011,9 +2415,6 @@ devExit.addEventListener(
 /* =========================================================
    MUTE
 ========================================================= */
-
-const muteBtn =
-    document.getElementById("muteBtn");
 
 if (muteBtn) {
     muteBtn.addEventListener(
@@ -2031,21 +2432,21 @@ if (muteBtn) {
 
 
 /* =========================================================
-   START
+   INITIAL STATE
 ========================================================= */
 
 updateHUD();
 
 overlayTitle.textContent =
-    "BREAKOUT";
+    "NEON BREAKOUT";
 
 overlaySubtitle.textContent =
-    "Break the wall. Survive the levels.";
+    "Разбей все блоки и доберись до следующего уровня";
 
 startBtn.textContent =
-    "PLAY";
+    "🎮 Играть";
 
 developerBtn.textContent =
-    "DEVELOPER MODE";
+    "🛠 Developer";
 
 requestAnimationFrame(update);
