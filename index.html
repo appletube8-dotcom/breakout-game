@@ -2,31 +2,211 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="theme-color" content="#090a0f">
-  <title>Космический Брейкаут</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neon Breakout</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
+
   <div id="game-wrap">
+
+    <!-- HUD -->
     <div id="hud">
-      <div class="hud-item">Счёт: <span id="score">0</span></div>
-      <div class="hud-item">Уровень: <span id="level">1</span></div>
-      <div class="hud-item">Жизни: <span id="lives">3</span></div>
-      <div class="hud-item">Рекорд: <span id="best">0</span></div>
-      <button id="muteBtn" title="Звук">🔊</button>
+      <div class="hud-item">
+        <span>Счёт</span>
+        <strong id="score">0</strong>
+      </div>
+
+      <div class="hud-item">
+        <span>Уровень</span>
+        <strong id="level">1</strong>
+      </div>
+
+      <div class="hud-item">
+        <span>Жизни</span>
+        <strong id="lives">3</strong>
+      </div>
+
+      <div class="hud-item">
+        <span>Рекорд</span>
+        <strong id="best">0</strong>
+      </div>
+
+      <button id="muteBtn" type="button">🔊</button>
     </div>
+
+    <!-- GAME -->
     <canvas id="game" width="800" height="600"></canvas>
+
+    <!-- START / GAME OVER OVERLAY -->
     <div id="overlay">
-      <h1>Космический Брейкаут</h1>
-      <p>Отбей все космические точки!</p>
-      <button id="startBtn">Поехали</button>
-      <p class="hint">Управление: ← → / A / D • на телефоне веди пальцем</p>
+      <div class="overlay-card">
+
+        <h1 id="overlayTitle">NEON BREAKOUT</h1>
+
+        <p id="overlaySubtitle">
+          Разбей все блоки и доберись до следующего уровня
+        </p>
+
+        <div class="start-buttons">
+          <button id="startBtn" type="button">
+            🎮 Играть
+          </button>
+
+          <button id="developerBtn" type="button" class="dev-btn">
+            🛠 Developer
+          </button>
+        </div>
+
+        <div class="hint" id="overlayHint">
+          Управление: ← → / A D / мышь / касание
+        </div>
+
+      </div>
     </div>
+
+    <!-- DEVELOPER PANEL -->
+    <div id="devPanel" class="dev-panel hidden">
+
+      <div class="dev-title">
+        🛠 DEVELOPER MODE
+      </div>
+
+      <div class="dev-section">
+
+        <label>
+          Уровень
+
+          <input
+            id="devLevelInput"
+            type="number"
+            min="1"
+            max="9999"
+            value="1"
+          >
+        </label>
+
+        <button id="devLoadLevel" type="button">
+          Загрузить уровень
+        </button>
+
+      </div>
+
+      <div class="dev-row">
+
+        <button id="devPrevLevel" type="button">
+          ← Назад
+        </button>
+
+        <button id="devNextLevel" type="button">
+          Вперёд →
+        </button>
+
+      </div>
+
+      <div class="dev-row">
+
+        <button id="devRestart" type="button">
+          ↻ Restart
+        </button>
+
+        <button id="devSkip" type="button">
+          ⏭ Skip
+        </button>
+
+      </div>
+
+      <div class="dev-section">
+
+        <label class="dev-checkbox">
+          <input
+            id="devInfiniteLives"
+            type="checkbox"
+            checked
+          >
+
+          <span>∞ Бесконечные жизни</span>
+        </label>
+
+        <label class="dev-checkbox">
+          <input
+            id="devGodMode"
+            type="checkbox"
+          >
+
+          <span>🛡 God Mode</span>
+        </label>
+
+        <label class="dev-checkbox">
+          <input
+            id="devHitboxes"
+            type="checkbox"
+          >
+
+          <span>▣ Show Hitboxes</span>
+        </label>
+
+        <label class="dev-checkbox">
+          <input
+            id="devSlowMotion"
+            type="checkbox"
+          >
+
+          <span>🐌 Slow Motion</span>
+        </label>
+
+      </div>
+
+      <div class="dev-section">
+
+        <label>
+          Частота боссов
+
+          <select id="devBossFrequency">
+
+            <option value="2">
+              Каждые 2 уровня
+            </option>
+
+            <option value="3">
+              Каждые 3 уровня
+            </option>
+
+            <option value="5" selected>
+              Каждые 5 уровней
+            </option>
+
+            <option value="10">
+              Каждые 10 уровней
+            </option>
+
+            <option value="random">
+              Random
+            </option>
+
+          </select>
+
+        </label>
+
+      </div>
+
+      <button
+        id="devExit"
+        type="button"
+        class="dev-exit"
+      >
+        ← Выйти из Developer
+      </button>
+
+    </div>
+
+    <!-- BUFFS -->
+    <div id="buffsWrap"></div>
+
   </div>
+
   <script src="game.js"></script>
+
 </body>
 </html>
