@@ -1,113 +1,5 @@
-// ============================================================
-// NEON BREAKOUT
-// BUILD 1
-// Player Mode + Developer Mode
-// ============================================================
-
-
-// ============================================================
-// AUDIO
-// ============================================================
-
-let audioCtx = null;
-let muted = false;
-
-function initAudio() {
-  if (!audioCtx) {
-    const AudioContext =
-      window.AudioContext ||
-      window.webkitAudioContext;
-
-    if (AudioContext) {
-      audioCtx = new AudioContext();
-    }
-  }
-
-  if (audioCtx && audioCtx.state === "suspended") {
-    audioCtx.resume();
-  }
-}
-
-function tone(
-  frequency = 440,
-  duration = 0.05,
-  type = "sine",
-  volume = 0.04
-) {
-  if (muted) return;
-
-  initAudio();
-
-  if (!audioCtx) return;
-
-  const oscillator = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-
-  oscillator.type = type;
-  oscillator.frequency.value = frequency;
-
-  gain.gain.setValueAtTime(volume, audioCtx.currentTime);
-
-  gain.gain.exponentialRampToValueAtTime(
-    0.001,
-    audioCtx.currentTime + duration
-  );
-
-  oscillator.connect(gain);
-  gain.connect(audioCtx.destination);
-
-  oscillator.start();
-
-  oscillator.stop(
-    audioCtx.currentTime + duration
-  );
-}
-
-function sfx(name) {
-  if (name === "brick") {
-    tone(520, 0.035, "square", 0.025);
-  }
-
-  if (name === "break") {
-    tone(180, 0.08, "sawtooth", 0.04);
-  }
-
-  if (name === "paddle") {
-    tone(280, 0.035, "sine", 0.025);
-  }
-
-  if (name === "bonus") {
-    tone(760, 0.08, "triangle", 0.04);
-    setTimeout(() => tone(980, 0.08, "triangle", 0.03), 60);
-  }
-
-  if (name === "level") {
-    tone(520, 0.1, "triangle", 0.04);
-    setTimeout(() => tone(700, 0.1, "triangle", 0.04), 80);
-    setTimeout(() => tone(920, 0.14, "triangle", 0.04), 160);
-  }
-
-  if (name === "gameover") {
-    tone(260, 0.12, "sawtooth", 0.035);
-    setTimeout(() => tone(180, 0.2, "sawtooth", 0.035), 100);
-  }
-}
-
-
-// ============================================================
-// CANVAS
-// ============================================================
-
-const canvas = document.getElementById("game");
+const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
-
-const W = canvas.width;
-const H = canvas.height;
-
-
-// ============================================================
-// DOM
-// ============================================================
 
 const scoreEl = document.getElementById("score");
 const levelEl = document.getElementById("level");
@@ -117,2762 +9,2043 @@ const bestEl = document.getElementById("best");
 const overlay = document.getElementById("overlay");
 const overlayTitle = document.getElementById("overlayTitle");
 const overlaySubtitle = document.getElementById("overlaySubtitle");
-const overlayHint = document.getElementById("overlayHint");
 
 const startBtn = document.getElementById("startBtn");
 const developerBtn = document.getElementById("developerBtn");
 
-const muteBtn = document.getElementById("muteBtn");
+const devPanel = document.getElementById("devPanel");
+const devLevel = document.getElementById("devLevel");
+const devLoad = document.getElementById("devLoad");
+const devPrev = document.getElementById("devPrev");
+const devNext = document.getElementById("devNext");
+const devRestart = document.getElementById("devRestart");
+const devSkip = document.getElementById("devSkip");
+
+const devInfiniteLives = document.getElementById("devInfiniteLives");
+const devGodMode = document.getElementById("devGodMode");
+const devHitboxes = document.getElementById("devHitboxes");
+const devSlowMotion = document.getElementById("devSlowMotion");
+const devBossFrequency = document.getElementById("devBossFrequency");
+const devExit = document.getElementById("devExit");
 
 const buffsWrap = document.getElementById("buffsWrap");
 
+canvas.width = 800;
+canvas.height = 600;
 
-// ============================================================
-// GAME STATE
-// ============================================================
+
+/* =========================================================
+   AUDIO
+========================================================= */
+
+let audioCtx = null;
+let muted = false;
+
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+}
+
+function beep(freq = 440, duration = 0.05, type = "square", volume = 0.03) {
+    if (muted) return;
+
+    try {
+        initAudio();
+
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = type;
+        osc.frequency.value = freq;
+
+        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(
+            0.001,
+            audioCtx.currentTime + duration
+        );
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    } catch (e) {}
+}
+
+
+/* =========================================================
+   GAME STATE
+========================================================= */
 
 const state = {
-  running: false,
-  score: 0,
-  lives: 3,
-  level: 1
+    running: false,
+    score: 0,
+    level: 1,
+    lives: 3,
+    best: Number(localStorage.getItem("breakoutBest") || 0)
 };
 
-
-// ============================================================
-// DEVELOPER MODE
-// ============================================================
+bestEl.textContent = state.best;
 
 let devMode = false;
 
 const devConfig = {
-  infiniteLives: true,
-  godMode: false,
-  showHitboxes: false,
-  slowMotion: false,
-  bossFrequency: 5
+    infiniteLives: true,
+    godMode: false,
+    showHitboxes: false,
+    slowMotion: false,
+    bossFrequency: 5
 };
 
-const devPanel = document.getElementById("devPanel");
+let currentPattern = null;
+let currentPatternName = "";
 
-const devLevelInput =
-  document.getElementById("devLevelInput");
-
-const devLoadLevel =
-  document.getElementById("devLoadLevel");
-
-const devPrevLevel =
-  document.getElementById("devPrevLevel");
-
-const devNextLevel =
-  document.getElementById("devNextLevel");
-
-const devRestart =
-  document.getElementById("devRestart");
-
-const devSkip =
-  document.getElementById("devSkip");
-
-const devInfiniteLives =
-  document.getElementById("devInfiniteLives");
-
-const devGodMode =
-  document.getElementById("devGodMode");
-
-const devHitboxes =
-  document.getElementById("devHitboxes");
-
-const devSlowMotion =
-  document.getElementById("devSlowMotion");
-
-const devBossFrequency =
-  document.getElementById("devBossFrequency");
-
-const devExit =
-  document.getElementById("devExit");
+let levelTransitionLock = false;
 
 
-// ============================================================
-// PLATFORM
-// ============================================================
+/* =========================================================
+   COLORS
+========================================================= */
+
+const brickColors = [
+    "#ff4d6d",
+    "#ff9f1c",
+    "#ffe66d",
+    "#00f5d4",
+    "#4dabf7",
+    "#9b5de5"
+];
+
+
+/* =========================================================
+   PLAYER
+========================================================= */
 
 const platform = {
-  x: W / 2,
-  y: H - 30,
-
-  w: 110,
-  baseW: 110,
-
-  h: 14,
-
-  speed: 8,
-
-  vx: 0,
-
-  fire: false,
-  fireTimer: 0
+    x: 340,
+    y: 550,
+    w: 120,
+    baseW: 120,
+    h: 15,
+    speed: 8,
+    vx: 0,
+    fire: false,
+    fireTimer: 0
 };
 
 
-// ============================================================
-// OBJECT ARRAYS
-// ============================================================
+/* =========================================================
+   OBJECT ARRAYS
+========================================================= */
 
 let balls = [];
 let bricks = [];
 let bonuses = [];
 let particles = [];
-
 let stars = [];
 
-let powers = {};
 
+/* =========================================================
+   POWER-UPS
+========================================================= */
 
-// ============================================================
-// INPUT
-// ============================================================
-
-const keys = {
-  left: false,
-  right: false
+const powers = {
+    big: 0,
+    fire: 0,
+    multi: 0,
+    slow: 0
 };
 
-let mouseX = W / 2;
+
+/* =========================================================
+   INPUT
+========================================================= */
+
+const keys = {
+    left: false,
+    right: false
+};
+
+let mouseX = null;
+
+document.addEventListener("keydown", e => {
+    if (
+        e.code === "ArrowLeft" ||
+        e.code === "KeyA"
+    ) {
+        keys.left = true;
+    }
+
+    if (
+        e.code === "ArrowRight" ||
+        e.code === "KeyD"
+    ) {
+        keys.right = true;
+    }
+
+    if (
+        e.code === "Space" ||
+        e.code === "ArrowUp" ||
+        e.code === "KeyW"
+    ) {
+        e.preventDefault();
+
+        if (!state.running) {
+            if (devMode) {
+                startGame("developer", state.level);
+            } else {
+                startGame("player", state.level);
+            }
+        }
+
+        balls.forEach(ball => {
+            if (ball.stuck) {
+                ball.stuck = false;
+            }
+        });
+    }
+});
+
+document.addEventListener("keyup", e => {
+    if (
+        e.code === "ArrowLeft" ||
+        e.code === "KeyA"
+    ) {
+        keys.left = false;
+    }
+
+    if (
+        e.code === "ArrowRight" ||
+        e.code === "KeyD"
+    ) {
+        keys.right = false;
+    }
+});
+
+canvas.addEventListener("mousemove", e => {
+    const rect = canvas.getBoundingClientRect();
+
+    mouseX =
+        (e.clientX - rect.left) *
+        (canvas.width / rect.width);
+});
+
+canvas.addEventListener("click", () => {
+    initAudio();
+
+    if (!state.running) {
+        startGame(devMode ? "developer" : "player", state.level);
+    }
+
+    balls.forEach(ball => {
+        if (ball.stuck) {
+            ball.stuck = false;
+        }
+    });
+});
+
+canvas.addEventListener("touchstart", e => {
+    e.preventDefault();
+
+    initAudio();
+
+    if (!state.running) {
+        startGame(devMode ? "developer" : "player", state.level);
+    }
+
+    balls.forEach(ball => {
+        if (ball.stuck) {
+            ball.stuck = false;
+        }
+    });
+}, { passive: false });
+
+canvas.addEventListener("touchmove", e => {
+    e.preventDefault();
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+
+    mouseX =
+        (touch.clientX - rect.left) *
+        (canvas.width / rect.width);
+}, { passive: false });
 
 
-// ============================================================
-// LEVEL COLORS
-// ============================================================
-
-const LEVEL_COLORS = [
-  "#7ad7ff",
-  "#b48cff",
-  "#6fffd0",
-  "#ff9a3c",
-  "#ff6fa5"
-];
-
-
-// ============================================================
-// BONUS TYPES
-// ============================================================
-
-const BONUS_TYPES = [
-  {
-    id: "big",
-    label: "Широкая пластина",
-    color: "#6fffd0"
-  },
-
-  {
-    id: "fire",
-    label: "Огненный мяч",
-    color: "#ff6f3c"
-  },
-
-  {
-    id: "multi",
-    label: "Тройной мяч",
-    color: "#b48cff"
-  },
-
-  {
-    id: "slow",
-    label: "Замедление",
-    color: "#5ec8ff"
-  }
-];
-
-
-// ============================================================
-// BACKGROUND STARS
-// ============================================================
+/* =========================================================
+   STARS
+========================================================= */
 
 function createStars() {
-  stars = [];
+    stars = [];
 
-  for (let i = 0; i < 100; i++) {
-    stars.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      r: Math.random() * 1.5 + 0.2,
-      a: Math.random() * 0.7 + 0.1,
-      tw: Math.random() * Math.PI * 2,
-      speed: Math.random() * 0.02 + 0.005
-    });
-  }
+    for (let i = 0; i < 90; i++) {
+        stars.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            r: Math.random() * 1.5 + 0.3,
+            a: Math.random() * 0.7 + 0.2,
+            speed: Math.random() * 0.02 + 0.005
+        });
+    }
 }
 
 createStars();
 
 
-// ============================================================
-// LEVEL GENERATION
-// ============================================================
+/* =========================================================
+   LEVEL PATTERNS
+========================================================= */
 
-function buildLevel(lvl) {
-  bricks.length = 0;
+const PATTERNS = [
+    {
+        name: "DIAMOND",
+        grid: [
+            ".....##.....",
+            "....####....",
+            "...######...",
+            "..########..",
+            ".##########.",
+            "############",
+            ".##########.",
+            "..########..",
+            "...######...",
+            "....####...."
+        ]
+    },
 
-  const rows = Math.min(3 + lvl, 8);
-  const cols = 10;
+    {
+        name: "SPIRAL",
+        grid: [
+            "############",
+            "#..........#",
+            "#.########.#",
+            "#.#........#",
+            "#.#.######.#",
+            "#.#.#....#.#",
+            "#.#.#.##.#.#",
+            "#.#.#....#.#",
+            "#.#.######.#",
+            "#..........#"
+        ]
+    },
 
-  const brickW = 62;
-  const brickH = 22;
-  const gap = 8;
+    {
+        name: "CROSS",
+        grid: [
+            ".....##.....",
+            ".....##.....",
+            ".....##.....",
+            ".....##.....",
+            "############",
+            "############",
+            ".....##.....",
+            ".....##.....",
+            ".....##.....",
+            ".....##....."
+        ]
+    },
 
-  const totalW =
-    cols * brickW +
-    (cols - 1) * gap;
+    {
+        name: "CIRCLE",
+        grid: [
+            "....####....",
+            "..##....##..",
+            ".##......##.",
+            "##........##",
+            "##........##",
+            "##........##",
+            ".##......##.",
+            "..##....##..",
+            "....####....",
+            "............"
+        ]
+    },
 
-  const startX =
-    (W - totalW) / 2;
+    {
+        name: "GALAXY",
+        grid: [
+            "....##......",
+            "...####.....",
+            "..##..##....",
+            ".##....##...",
+            "######.#####",
+            ".##....##...",
+            "..##..##....",
+            "...####.....",
+            "....##......",
+            "....##......"
+        ]
+    },
 
-  const top = 80;
+    {
+        name: "WINGS",
+        grid: [
+            "##......##..",
+            "###....###..",
+            "####..####..",
+            "#####.#####.",
+            "############",
+            ".##########.",
+            "..########..",
+            "...######...",
+            "....####....",
+            ".....##....."
+        ]
+    },
 
-  for (let row = 0; row < rows; row++) {
+    {
+        name: "MAZE",
+        grid: [
+            "############",
+            "#......#...#",
+            "#####..#.#.#",
+            "#......#.#.#",
+            "#.######.#.#",
+            "#........#.#",
+            "#.########.#",
+            "#..........#",
+            "##########.#",
+            "............"
+        ]
+    },
 
-    for (let col = 0; col < cols; col++) {
+    {
+        name: "ARROW",
+        grid: [
+            ".....##.....",
+            "....####....",
+            "...######...",
+            "..########..",
+            ".##########.",
+            "############",
+            ".....##.....",
+            ".....##.....",
+            ".....##.....",
+            ".....##....."
+        ]
+    },
 
-      let hp = 1;
+    {
+        name: "STAR",
+        grid: [
+            ".....##.....",
+            ".....##.....",
+            ".##..##..##.",
+            "..########..",
+            "############",
+            ".##########.",
+            "..########..",
+            ".##..##..##.",
+            "##...##...##",
+            ".....##....."
+        ]
+    },
 
-      if (
-        lvl >= 3 &&
-        (row === 0 || row === 1)
-      ) {
-        hp = 2;
-      }
+    {
+        name: "CORE",
+        grid: [
+            "....####....",
+            "...######...",
+            "..########..",
+            ".###....###.",
+            "###..##..###",
+            "###..##..###",
+            ".###....###.",
+            "..########..",
+            "...######...",
+            "....####...."
+        ]
+    }
+];
 
-      if (
-        hp === 2 &&
-        Math.random() < 0.22
-      ) {
-        hp = 3;
-      }
 
-      const color =
-        LEVEL_COLORS[
-          (row + lvl) %
-          LEVEL_COLORS.length
-        ];
+/* =========================================================
+   LEVEL HELPERS
+========================================================= */
 
-      bricks.push({
-        x:
-          startX +
-          col * (brickW + gap),
+function getPatternForLevel(level) {
+    const index = (level - 1) % PATTERNS.length;
+    return PATTERNS[index];
+}
 
-        y:
-          top +
-          row * (brickH + gap),
+function getBrickHP(level, row, col) {
+    let hp = 1;
 
-        w: brickW,
-        h: brickH,
+    if (level >= 4) hp = 2;
+    if (level >= 8) hp = 3;
 
+    // Central bricks become stronger on higher levels.
+    const centerCol = 5.5;
+    const centerRow = 4.5;
+
+    const distance =
+        Math.abs(col - centerCol) +
+        Math.abs(row - centerRow);
+
+    if (level >= 6 && distance < 4) {
+        hp++;
+    }
+
+    return Math.min(hp, 3);
+}
+
+function createBrick(x, y, w, h, hp, colorIndex) {
+    bricks.push({
+        x,
+        y,
+        w,
+        h,
         hp,
         maxHp: hp,
-
-        color,
-
+        colorIndex: colorIndex % brickColors.length,
         alive: true
-      });
-    }
-  }
-}
-
-
-// ============================================================
-// BALL
-// ============================================================
-
-function createBall(
-  x,
-  y,
-  vx,
-  vy,
-  fire = false
-) {
-  return {
-    x,
-    y,
-
-    r: 7,
-
-    vx,
-    vy,
-
-    speed: Math.sqrt(vx * vx + vy * vy),
-
-    stuck: true,
-
-    fire,
-
-    trail: []
-  };
-}
-
-
-function spawnBalls(count = 1) {
-
-  balls.length = 0;
-
-  for (let i = 0; i < count; i++) {
-
-    const angle =
-      -Math.PI / 2 +
-      (Math.random() - 0.5) * 0.7;
-
-    const speed = 5.5;
-
-    const ball = createBall(
-      platform.x,
-      platform.y - 15,
-
-      Math.cos(angle) * speed,
-      Math.sin(angle) * speed,
-
-      powers.fire === true
-    );
-
-    ball.stuck = true;
-
-    balls.push(ball);
-  }
-}
-
-
-function resetBall() {
-  spawnBalls(1);
-}
-
-
-// ============================================================
-// BALL RELEASE
-// ============================================================
-
-function releaseStuck() {
-
-  for (const ball of balls) {
-
-    if (!ball.stuck) continue;
-
-    const angle =
-      -Math.PI / 2 +
-      (Math.random() - 0.5) * 0.7;
-
-    const speed =
-      devConfig.slowMotion
-        ? 4.8
-        : 5.5;
-
-    ball.vx =
-      Math.cos(angle) * speed;
-
-    ball.vy =
-      Math.sin(angle) * speed;
-
-    ball.speed = speed;
-
-    ball.stuck = false;
-  }
-}
-
-
-// ============================================================
-// BONUS
-// ============================================================
-
-function spawnBonus(x, y) {
-
-  if (Math.random() > 0.22) {
-    return;
-  }
-
-  const type =
-    BONUS_TYPES[
-      Math.floor(
-        Math.random() *
-        BONUS_TYPES.length
-      )
-    ];
-
-  bonuses.push({
-    x,
-    y,
-
-    vy: 2.2,
-
-    r: 12,
-
-    type: type.id,
-
-    label: type.label,
-
-    color: type.color,
-
-    ang: 0
-  });
-}
-
-
-// ============================================================
-// PARTICLES
-// ============================================================
-
-function explode(
-  x,
-  y,
-  color,
-  count = 14
-) {
-
-  for (let i = 0; i < count; i++) {
-
-    const angle =
-      Math.random() *
-      Math.PI *
-      2;
-
-    const speed =
-      Math.random() *
-      3 +
-      1;
-
-    particles.push({
-      x,
-      y,
-
-      vx:
-        Math.cos(angle) *
-        speed,
-
-      vy:
-        Math.sin(angle) *
-        speed,
-
-      life: 1,
-
-      size:
-        Math.random() *
-        3 +
-        1,
-
-      color
     });
-  }
 }
 
 
-// ============================================================
-// COLLISION
-// ============================================================
+/* =========================================================
+   BUILD LEVEL
+========================================================= */
 
-function circleRectCollision(
-  ball,
-  rect
-) {
+function buildLevel(level) {
+    bricks = [];
+    bonuses = [];
+    particles = [];
 
-  const closestX =
-    Math.max(
-      rect.x,
-      Math.min(
-        ball.x,
-        rect.x + rect.w
-      )
-    );
+    currentPattern = getPatternForLevel(level);
+    currentPatternName = currentPattern.name;
 
-  const closestY =
-    Math.max(
-      rect.y,
-      Math.min(
-        ball.y,
-        rect.y + rect.h
-      )
-    );
+    const grid = currentPattern.grid;
 
-  const dx =
-    ball.x - closestX;
+    const cols = 12;
+    const rows = grid.length;
 
-  const dy =
-    ball.y - closestY;
+    const brickW = 54;
+    const brickH = 21;
+    const gap = 6;
 
-  const distSq =
-    dx * dx +
-    dy * dy;
+    const totalW =
+        cols * brickW +
+        (cols - 1) * gap;
 
-  if (distSq > ball.r * ball.r) {
-    return null;
-  }
+    const startX =
+        (canvas.width - totalW) / 2;
 
-  const dist =
-    Math.sqrt(distSq);
+    const startY = 72;
 
-  let nx = 0;
-  let ny = 0;
+    for (let row = 0; row < rows; row++) {
+        const line = grid[row];
 
-  if (dist > 0.0001) {
+        for (let col = 0; col < cols; col++) {
+            if (line[col] !== "#") continue;
 
-    nx = dx / dist;
-    ny = dy / dist;
+            const hp = getBrickHP(level, row, col);
 
-  } else {
+            createBrick(
+                startX + col * (brickW + gap),
+                startY + row * (brickH + gap),
+                brickW,
+                brickH,
+                hp,
+                row + col + level
+            );
+        }
+    }
 
-    const left =
-      Math.abs(
-        ball.x - rect.x
-      );
+    resetPlatform();
+    resetBalls();
 
-    const right =
-      Math.abs(
-        ball.x -
-        (rect.x + rect.w)
-      );
+    updateHUD();
+}
 
-    const top =
-      Math.abs(
-        ball.y - rect.y
-      );
 
-    const bottom =
-      Math.abs(
-        ball.y -
-        (rect.y + rect.h)
-      );
+/* =========================================================
+   PLATFORM
+========================================================= */
 
-    const min =
-      Math.min(
-        left,
-        right,
-        top,
-        bottom
-      );
+function resetPlatform() {
+    platform.baseW = 120;
 
-    if (min === left) {
-      nx = -1;
-    } else if (min === right) {
-      nx = 1;
-    } else if (min === top) {
-      ny = -1;
+    if (powers.big > 0) {
+        platform.w = 180;
     } else {
-      ny = 1;
+        platform.w = platform.baseW;
     }
-  }
 
-  return {
-    nx,
-    ny,
-    push:
-      ball.r -
-      dist +
-      0.5
-  };
+    platform.x =
+        (canvas.width - platform.w) / 2;
+
+    platform.y = 550;
+    platform.vx = 0;
+
+    platform.fire = powers.fire > 0;
 }
 
 
-// ============================================================
-// KEEP VERTICAL MOVEMENT
-// ============================================================
+/* =========================================================
+   BALLS
+========================================================= */
 
-function keepBallMovingVertically(ball) {
-
-  const minVertical = 1.3;
-
-  if (
-    Math.abs(ball.vy) <
-    minVertical
-  ) {
-
-    ball.vy =
-      ball.vy >= 0
-        ? minVertical
-        : -minVertical;
-  }
+function createBall(x, y, dx, dy, stuck = false) {
+    return {
+        x,
+        y,
+        r: 7,
+        dx,
+        dy,
+        speed: 5.5,
+        stuck,
+        trail: []
+    };
 }
 
-
-// ============================================================
-// HIT BRICK
-// ============================================================
-
-function hitBrick(ball, brick) {
-
-  brick.hp--;
-
-  state.score += 50;
-
-  explode(
-    ball.x,
-    ball.y,
-    brick.color,
-    5
-  );
-
-  sfx("brick");
-
-  if (brick.hp <= 0) {
-
-    brick.alive = false;
-
-    state.score += 100;
-
-    spawnBonus(
-      brick.x + brick.w / 2,
-      brick.y + brick.h / 2
-    );
-
-    explode(
-      brick.x + brick.w / 2,
-      brick.y + brick.h / 2,
-      brick.color,
-      16
-    );
-
-    sfx("break");
-  }
-
-  updateScore();
-}
-
-
-// ============================================================
-// BONUS EFFECTS
-// ============================================================
-
-function applyBonus(type) {
-
-  if (type === "big") {
-
-    platform.w =
-      Math.min(
-        platform.baseW * 1.8,
-        platform.w * 1.35
-      );
-
-    powers.big = true;
-
-    clearTimeout(
-      powers.bigTimer
-    );
-
-    powers.bigTimer =
-      setTimeout(() => {
-
-        platform.w =
-          platform.baseW;
-
-        powers.big = false;
-
-      }, 15000);
-  }
-
-
-  if (type === "fire") {
-
-    powers.fire = true;
-
-    for (const ball of balls) {
-      ball.fire = true;
-    }
-
-    clearTimeout(
-      powers.fireTimer
-    );
-
-    powers.fireTimer =
-      setTimeout(() => {
-
-        powers.fire = false;
-
-        for (const ball of balls) {
-          ball.fire = false;
-        }
-
-      }, 12000);
-  }
-
-
-  if (type === "multi") {
-
-    if (balls.length < 8) {
-
-      const current =
-        [...balls];
-
-      for (
-        const source
-        of current
-      ) {
-
-        if (
-          balls.length >= 8
-        ) {
-          break;
-        }
-
-        if (source.stuck) {
-          continue;
-        }
-
-        const angle =
-          Math.atan2(
-            source.vy,
-            source.vx
-          );
-
-        const offset =
-          (Math.random() > 0.5
-            ? 1
-            : -1) *
-          (0.25 + Math.random() * 0.3);
-
-        const speed =
-          Math.sqrt(
-            source.vx *
-            source.vx +
-            source.vy *
-            source.vy
-          );
-
-        const clone =
-          createBall(
-            source.x,
-            source.y,
-
-            Math.cos(
-              angle + offset
-            ) * speed,
-
-            Math.sin(
-              angle + offset
-            ) * speed,
-
-            powers.fire === true
-          );
-
-        clone.stuck = false;
-
-        balls.push(clone);
-      }
-    }
-  }
-
-
-  if (type === "slow") {
-
-    powers.slow = true;
-
-    for (const ball of balls) {
-
-      ball.vx *= 0.75;
-      ball.vy *= 0.75;
-    }
-
-    clearTimeout(
-      powers.slowTimer
-    );
-
-    powers.slowTimer =
-      setTimeout(() => {
-
-        powers.slow = false;
-
-        for (const ball of balls) {
-
-          ball.vx *= 1.3333;
-          ball.vy *= 1.3333;
-        }
-
-      }, 10000);
-  }
-}
-
-
-// ============================================================
-// BUFF UI
-// ============================================================
-
-function showBuff(
-  label,
-  color
-) {
-
-  const buff =
-    document.createElement("div");
-
-  buff.className = "buff";
-
-  buff.textContent = label;
-
-  buff.style.color = color;
-
-  buff.style.borderColor =
-    color;
-
-  buffsWrap.appendChild(buff);
-
-  setTimeout(() => {
-
-    buff.remove();
-
-  }, 2200);
-}
-
-
-// ============================================================
-// PLATFORM INPUT
-// ============================================================
-
-function updatePlatform() {
-
-  platform.vx = 0;
-
-  if (keys.left) {
-    platform.vx -= platform.speed;
-  }
-
-  if (keys.right) {
-    platform.vx += platform.speed;
-  }
-
-  if (platform.vx !== 0) {
-
-    platform.x +=
-      platform.vx;
-  }
-
-  if (platform.vx === 0) {
-
-    const dx =
-      mouseX -
-      platform.x;
-
-    if (
-      Math.abs(dx) > 1
-    ) {
-
-      platform.x +=
-        dx * 0.25;
-    }
-  }
-
-  const half =
-    platform.w / 2;
-
-  platform.x =
-    Math.max(
-      half,
-      Math.min(
-        W - half,
-        platform.x
-      )
-    );
-}
-
-
-// ============================================================
-// UPDATE
-// ============================================================
-
-function update() {
-
-  if (!state.running) {
-    return;
-  }
-
-  const timeScale =
-    devMode &&
-    devConfig.slowMotion
-      ? 0.35
-      : 1;
-
-  updatePlatform();
-
-
-  // ----------------------------------------------------------
-  // BALLS
-  // ----------------------------------------------------------
-
-  for (const ball of balls) {
-
-    if (ball.stuck) {
-
-      ball.x =
-        platform.x;
-
-      ball.y =
-        platform.y -
-        ball.r -
-        2;
-
-      continue;
-    }
-
-
-    const velocity =
-      Math.sqrt(
-        ball.vx * ball.vx +
-        ball.vy * ball.vy
-      );
-
-    const steps =
-      Math.max(
-        1,
-        Math.ceil(
-          velocity / 4
+function resetBalls() {
+    balls = [
+        createBall(
+            platform.x + platform.w / 2,
+            platform.y - 10,
+            0,
+            -5.5,
+            true
         )
-      );
+    ];
+}
 
 
-    for (
-      let step = 0;
-      step < steps;
-      step++
-    ) {
+/* =========================================================
+   GAME START
+========================================================= */
 
-      ball.x +=
-        (ball.vx / steps) *
-        timeScale;
+function startGame(mode = "player", level = 1) {
+    initAudio();
 
-      ball.y +=
-        (ball.vy / steps) *
-        timeScale;
+    devMode = mode === "developer";
 
+    state.running = true;
+    state.level = Math.max(1, Number(level) || 1);
 
-      // ------------------------------------------------------
-      // WALLS
-      // ------------------------------------------------------
+    state.score = 0;
 
-      if (
-        ball.x -
-          ball.r <=
-        0
-      ) {
-
-        ball.x =
-          ball.r;
-
-        ball.vx =
-          Math.abs(
-            ball.vx
-          );
-
-        sfx("brick");
-      }
-
-
-      if (
-        ball.x +
-          ball.r >=
-        W
-      ) {
-
-        ball.x =
-          W -
-          ball.r;
-
-        ball.vx =
-          -Math.abs(
-            ball.vx
-          );
-
-        sfx("brick");
-      }
-
-
-      if (
-        ball.y -
-          ball.r <=
-        0
-      ) {
-
-        ball.y =
-          ball.r;
-
-        ball.vy =
-          Math.abs(
-            ball.vy
-          );
-
-        sfx("brick");
-      }
-
-
-      // ------------------------------------------------------
-      // PLATFORM
-      // ------------------------------------------------------
-
-      if (
-        ball.vy > 0 &&
-        ball.y + ball.r >=
-          platform.y &&
-        ball.y - ball.r <=
-          platform.y +
-          platform.h &&
-        ball.x >=
-          platform.x -
-          platform.w / 2 &&
-        ball.x <=
-          platform.x +
-          platform.w / 2
-      ) {
-
-        ball.y =
-          platform.y -
-          ball.r -
-          0.5;
-
-        const hit =
-          (
-            ball.x -
-            platform.x
-          ) /
-          (platform.w / 2);
-
-        const maxAngle =
-          Math.PI / 3;
-
-        const angle =
-          hit * maxAngle;
-
-        const speed =
-          Math.max(
-            5.2,
-            Math.sqrt(
-              ball.vx *
-                ball.vx +
-              ball.vy *
-                ball.vy
-            )
-          );
-
-        ball.vx =
-          Math.sin(angle) *
-          speed;
-
-        ball.vy =
-          -Math.cos(angle) *
-          speed;
-
-        ball.speed =
-          speed;
-
-        keepBallMovingVertically(ball);
-
-        sfx("paddle");
-      }
-
-
-      // ------------------------------------------------------
-      // BRICKS
-      // ------------------------------------------------------
-
-      for (const brick of bricks) {
-
-        if (!brick.alive) {
-          continue;
-        }
-
-        const collision =
-          circleRectCollision(
-            ball,
-            brick
-          );
-
-        if (!collision) {
-          continue;
-        }
-
-
-        ball.x +=
-          collision.nx *
-          collision.push;
-
-        ball.y +=
-          collision.ny *
-          collision.push;
-
-
-        hitBrick(
-          ball,
-          brick
-        );
-
-
-        // Fire balls pass through
-        if (!ball.fire) {
-
-          const dot =
-            ball.vx *
-              collision.nx +
-            ball.vy *
-              collision.ny;
-
-          ball.vx -=
-            2 *
-            dot *
-            collision.nx;
-
-          ball.vy -=
-            2 *
-            dot *
-            collision.ny;
-
-          keepBallMovingVertically(
-            ball
-          );
-        }
-
-        break;
-      }
+    if (devMode) {
+        state.lives =
+            devConfig.infiniteLives ||
+            devConfig.godMode
+                ? Infinity
+                : 3;
+    } else {
+        state.lives = 3;
     }
 
+    powers.big = 0;
+    powers.fire = 0;
+    powers.multi = 0;
+    powers.slow = 0;
 
-    // --------------------------------------------------------
-    // TRAIL
-    // --------------------------------------------------------
+    overlay.style.display = "none";
+    devPanel.style.display = devMode ? "block" : "none";
 
-    ball.trail.push({
-      x: ball.x,
-      y: ball.y
-    });
-
-    if (
-      ball.trail.length >
-      8
-    ) {
-      ball.trail.shift();
-    }
-  }
+    buildLevel(state.level);
+    updateBuffs();
+}
 
 
-  // ----------------------------------------------------------
-  // REMOVE LOST BALLS
-  // ----------------------------------------------------------
+/* =========================================================
+   DEVELOPER LEVEL
+========================================================= */
 
-  balls =
-    balls.filter(
-      ball =>
-        ball.y <
-        H + 30
-    );
+function loadDeveloperLevel(level) {
+    if (!devMode) return;
 
+    level = Math.max(1, Math.floor(Number(level) || 1));
 
-  // ----------------------------------------------------------
-  // LIFE LOST
-  // ----------------------------------------------------------
-
-  if (
-    balls.length === 0
-  ) {
+    state.level = level;
 
     if (
-      devMode &&
-      (
         devConfig.infiniteLives ||
         devConfig.godMode
-      )
     ) {
-
-      resetBall();
-
-      livesEl.textContent =
-        devConfig.infiniteLives
-          ? "∞"
-          : state.lives;
-
-    } else {
-
-      state.lives--;
-
-      livesEl.textContent =
-        state.lives;
-
-      if (
-        state.lives <= 0
-      ) {
-
-        gameOver();
-
-      } else {
-
-        resetBall();
-      }
+        state.lives = Infinity;
     }
-  }
 
+    buildLevel(state.level);
+    updateHUD();
+}
 
-  // ----------------------------------------------------------
-  // RELEASE BALL
-  // ----------------------------------------------------------
+function restartLevel() {
+    if (!state.running) return;
 
-  // Space / W / ArrowUp handled in keydown.
+    buildLevel(state.level);
+}
 
-
-  // ----------------------------------------------------------
-  // BONUSES
-  // ----------------------------------------------------------
-
-  for (
-    const bonus
-    of bonuses
-  ) {
-
-    bonus.y +=
-      bonus.vy *
-      timeScale;
-
-    bonus.ang +=
-      0.05 *
-      timeScale;
-
-
-    const left =
-      platform.x -
-      platform.w / 2;
-
-    const right =
-      platform.x +
-      platform.w / 2;
-
-
-    if (
-      bonus.y +
-        bonus.r >=
-        platform.y &&
-      bonus.y -
-        bonus.r <=
-        platform.y +
-        platform.h &&
-      bonus.x >= left &&
-      bonus.x <= right
-    ) {
-
-      applyBonus(
-        bonus.type
-      );
-
-      state.score += 150;
-
-      updateScore();
-
-      showBuff(
-        bonus.label,
-        bonus.color
-      );
-
-      sfx("bonus");
-
-      bonus.y =
-        H + 100;
-    }
-  }
-
-
-  bonuses =
-    bonuses.filter(
-      bonus =>
-        bonus.y <
-        H + 40
-    );
-
-
-  // ----------------------------------------------------------
-  // PARTICLES
-  // ----------------------------------------------------------
-
-  for (const particle of particles) {
-
-    particle.x +=
-      particle.vx *
-      timeScale;
-
-    particle.y +=
-      particle.vy *
-      timeScale;
-
-    particle.vy +=
-      0.05 *
-      timeScale;
-
-    particle.life -=
-      0.025 *
-      timeScale;
-  }
-
-
-  particles =
-    particles.filter(
-      particle =>
-        particle.life > 0
-    );
-
-
-  // ----------------------------------------------------------
-  // STARS
-  // ----------------------------------------------------------
-
-  for (const star of stars) {
-
-    star.tw +=
-      star.speed *
-      timeScale;
-  }
-
-
-  // ----------------------------------------------------------
-  // LEVEL COMPLETE
-  // ----------------------------------------------------------
-
-  const remaining =
-    bricks.some(
-      brick =>
-        brick.alive
-    );
-
-  if (
-    !remaining &&
-    state.running
-  ) {
+function skipLevel() {
+    if (!state.running) return;
 
     state.level++;
 
-    levelEl.textContent =
-      state.level;
-
-    buildLevel(
-      state.level
-    );
-
-    resetBall();
-
-    sfx("level");
-  }
-
-
-  updateScore();
+    buildLevel(state.level);
 }
 
 
-// ============================================================
-// DRAW
-// ============================================================
+/* =========================================================
+   LEVEL COMPLETE
+========================================================= */
 
-function draw() {
+function checkLevelComplete() {
+    if (levelTransitionLock) return;
 
-  // ----------------------------------------------------------
-  // BACKGROUND
-  // ----------------------------------------------------------
+    const alive = bricks.some(brick => brick.alive);
 
-  const gradient =
-    ctx.createRadialGradient(
-      W / 2,
-      H / 2,
-      50,
-      W / 2,
-      H / 2,
-      600
-    );
+    if (alive) return;
 
-  gradient.addColorStop(
-    0,
-    "#111d38"
-  );
+    levelTransitionLock = true;
 
-  gradient.addColorStop(
-    1,
-    "#03050b"
-  );
+    beep(880, 0.12, "sine", 0.05);
+    beep(1100, 0.16, "sine", 0.04);
 
-  ctx.fillStyle =
-    gradient;
+    state.score += 500 + state.level * 50;
 
-  ctx.fillRect(
-    0,
-    0,
-    W,
-    H
-  );
+    setTimeout(() => {
+        state.level++;
+
+        buildLevel(state.level);
+
+        levelTransitionLock = false;
+    }, 700);
+}
 
 
-  // ----------------------------------------------------------
-  // STARS
-  // ----------------------------------------------------------
+/* =========================================================
+   PLAYER DEATH
+========================================================= */
 
-  for (const star of stars) {
-
-    const alpha =
-      star.a +
-      Math.sin(star.tw) *
-        0.2;
-
-    ctx.globalAlpha =
-      Math.max(
-        0.05,
-        alpha
-      );
-
-    ctx.fillStyle =
-      "#ffffff";
-
-    ctx.beginPath();
-
-    ctx.arc(
-      star.x,
-      star.y,
-      star.r,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-  }
-
-  ctx.globalAlpha = 1;
-
-
-  // ----------------------------------------------------------
-  // BRICKS
-  // ----------------------------------------------------------
-
-  for (const brick of bricks) {
-
-    if (!brick.alive) {
-      continue;
+function loseBall() {
+    if (
+        devMode &&
+        (
+            devConfig.infiniteLives ||
+            devConfig.godMode
+        )
+    ) {
+        resetBalls();
+        return;
     }
 
-    drawBrick(
-      brick
+    state.lives--;
+
+    updateHUD();
+
+    if (state.lives <= 0) {
+        gameOver();
+        return;
+    }
+
+    resetBalls();
+}
+
+
+/* =========================================================
+   GAME OVER
+========================================================= */
+
+function gameOver() {
+    state.running = false;
+
+    if (state.score > state.best) {
+        state.best = state.score;
+        localStorage.setItem(
+            "breakoutBest",
+            state.best
+        );
+    }
+
+    bestEl.textContent = state.best;
+
+    overlayTitle.textContent = "GAME OVER";
+    overlaySubtitle.textContent =
+        `Score: ${state.score}`;
+
+    startBtn.textContent = "PLAY AGAIN";
+    developerBtn.textContent = "DEVELOPER MODE";
+
+    overlay.style.display = "flex";
+}
+
+
+/* =========================================================
+   UPDATE PLATFORM
+========================================================= */
+
+function updatePlatform(dt) {
+    platform.vx = 0;
+
+    if (keys.left) {
+        platform.vx = -platform.speed;
+    }
+
+    if (keys.right) {
+        platform.vx = platform.speed;
+    }
+
+    if (mouseX !== null) {
+        const target =
+            mouseX - platform.w / 2;
+
+        platform.x +=
+            (target - platform.x) * 0.18;
+    } else {
+        platform.x += platform.vx * dt;
+    }
+
+    platform.x = Math.max(
+        0,
+        Math.min(
+            canvas.width - platform.w,
+            platform.x
+        )
     );
-  }
+
+    if (powers.big <= 0) {
+        platform.w = platform.baseW;
+    } else {
+        platform.w = 180;
+    }
+}
 
 
-  // ----------------------------------------------------------
-  // BONUSES
-  // ----------------------------------------------------------
+/* =========================================================
+   BALL UPDATE
+========================================================= */
 
-  for (
-    const bonus
-    of bonuses
-  ) {
+function updateBall(ball, dt) {
+    if (ball.stuck) {
+        ball.x =
+            platform.x +
+            platform.w / 2;
 
-    drawBonus(
-      bonus
+        ball.y =
+            platform.y -
+            ball.r -
+            2;
+
+        return;
+    }
+
+    ball.trail.push({
+        x: ball.x,
+        y: ball.y
+    });
+
+    if (ball.trail.length > 10) {
+        ball.trail.shift();
+    }
+
+    ball.x += ball.dx * dt;
+    ball.y += ball.dy * dt;
+
+    // Walls
+    if (ball.x - ball.r <= 0) {
+        ball.x = ball.r;
+        ball.dx = Math.abs(ball.dx);
+        beep(240, 0.025, "square", 0.02);
+    }
+
+    if (ball.x + ball.r >= canvas.width) {
+        ball.x = canvas.width - ball.r;
+        ball.dx = -Math.abs(ball.dx);
+        beep(240, 0.025, "square", 0.02);
+    }
+
+    if (ball.y - ball.r <= 0) {
+        ball.y = ball.r;
+        ball.dy = Math.abs(ball.dy);
+        beep(260, 0.025, "square", 0.02);
+    }
+
+    // Bottom
+    if (ball.y - ball.r > canvas.height) {
+        return false;
+    }
+
+    // Platform collision
+    if (
+        ball.dy > 0 &&
+        ball.y + ball.r >= platform.y &&
+        ball.y - ball.r <= platform.y + platform.h &&
+        ball.x >= platform.x &&
+        ball.x <= platform.x + platform.w
+    ) {
+        ball.y =
+            platform.y -
+            ball.r;
+
+        const hit =
+            (
+                ball.x -
+                (platform.x + platform.w / 2)
+            ) /
+            (platform.w / 2);
+
+        const angle =
+            hit * (Math.PI / 3);
+
+        const speed =
+            Math.sqrt(
+                ball.dx * ball.dx +
+                ball.dy * ball.dy
+            );
+
+        ball.dx =
+            Math.sin(angle) * speed;
+
+        ball.dy =
+            -Math.cos(angle) * speed;
+
+        if (Math.abs(ball.dy) < 2.2) {
+            ball.dy =
+                ball.dy < 0
+                    ? -2.2
+                    : 2.2;
+        }
+
+        beep(520, 0.035, "square", 0.025);
+
+        if (platform.fire) {
+            createParticles(
+                ball.x,
+                ball.y,
+                "#ff7a00",
+                8
+            );
+        }
+    }
+
+    // Bricks
+    for (const brick of bricks) {
+        if (!brick.alive) continue;
+
+        if (
+            ball.x + ball.r > brick.x &&
+            ball.x - ball.r < brick.x + brick.w &&
+            ball.y + ball.r > brick.y &&
+            ball.y - ball.r < brick.y + brick.h
+        ) {
+            handleBrickHit(ball, brick);
+
+            if (!powers.fire) {
+                resolveBrickBounce(ball, brick);
+            }
+
+            break;
+        }
+    }
+
+    return true;
+}
+
+
+/* =========================================================
+   BRICK COLLISION
+========================================================= */
+
+function resolveBrickBounce(ball, brick) {
+    const overlapLeft =
+        ball.x + ball.r - brick.x;
+
+    const overlapRight =
+        brick.x + brick.w -
+        (ball.x - ball.r);
+
+    const overlapTop =
+        ball.y + ball.r - brick.y;
+
+    const overlapBottom =
+        brick.y + brick.h -
+        (ball.y - ball.r);
+
+    const minHorizontal =
+        Math.min(
+            overlapLeft,
+            overlapRight
+        );
+
+    const minVertical =
+        Math.min(
+            overlapTop,
+            overlapBottom
+        );
+
+    if (minHorizontal < minVertical) {
+        ball.dx *= -1;
+    } else {
+        ball.dy *= -1;
+    }
+}
+
+
+/* =========================================================
+   BRICK HIT
+========================================================= */
+
+function handleBrickHit(ball, brick) {
+    brick.hp--;
+
+    state.score +=
+        brick.hp <= 0
+            ? 25
+            : 10;
+
+    if (brick.hp <= 0) {
+        brick.alive = false;
+
+        createParticles(
+            brick.x + brick.w / 2,
+            brick.y + brick.h / 2,
+            brickColors[brick.colorIndex],
+            12
+        );
+
+        beep(
+            300 + brick.colorIndex * 70,
+            0.04,
+            "square",
+            0.025
+        );
+
+        maybeDropBonus(
+            brick.x + brick.w / 2,
+            brick.y + brick.h / 2
+        );
+    } else {
+        createParticles(
+            brick.x + brick.w / 2,
+            brick.y + brick.h / 2,
+            brickColors[brick.colorIndex],
+            4
+        );
+
+        beep(
+            180 + brick.hp * 80,
+            0.025,
+            "square",
+            0.02
+        );
+    }
+
+    // Fireball punches through bricks.
+    if (powers.fire > 0) {
+        ball.dy *= 0.995;
+    }
+}
+
+
+/* =========================================================
+   BONUS DROPS
+========================================================= */
+
+function maybeDropBonus(x, y) {
+    const chance = 0.13;
+
+    if (Math.random() > chance) return;
+
+    const types = [
+        "big",
+        "fire",
+        "multi",
+        "slow"
+    ];
+
+    const type =
+        types[
+            Math.floor(
+                Math.random() *
+                types.length
+            )
+        ];
+
+    bonuses.push({
+        x,
+        y,
+        w: 22,
+        h: 22,
+        vy: 2.2,
+        type,
+        rotation: 0
+    });
+}
+
+
+/* =========================================================
+   BONUS UPDATE
+========================================================= */
+
+function updateBonuses(dt) {
+    for (let i = bonuses.length - 1; i >= 0; i--) {
+        const bonus = bonuses[i];
+
+        bonus.y += bonus.vy * dt;
+        bonus.rotation += 0.04 * dt;
+
+        if (
+            bonus.y + bonus.h >= platform.y &&
+            bonus.y <= platform.y + platform.h &&
+            bonus.x + bonus.w >= platform.x &&
+            bonus.x <= platform.x + platform.w
+        ) {
+            activatePower(bonus.type);
+
+            createParticles(
+                bonus.x + bonus.w / 2,
+                bonus.y + bonus.h / 2,
+                "#ffffff",
+                15
+            );
+
+            bonuses.splice(i, 1);
+            continue;
+        }
+
+        if (bonus.y > canvas.height + 40) {
+            bonuses.splice(i, 1);
+        }
+    }
+}
+
+
+/* =========================================================
+   ACTIVATE POWER
+========================================================= */
+
+function activatePower(type) {
+    powers[type] =
+        Math.max(
+            powers[type] || 0,
+            600
+        );
+
+    if (type === "big") {
+        platform.w = 180;
+    }
+
+    if (type === "fire") {
+        platform.fire = true;
+    }
+
+    if (type === "multi") {
+        if (balls.length < 5) {
+            const source = balls[0];
+
+            if (source) {
+                balls.push(
+                    createBall(
+                        source.x,
+                        source.y,
+                        -4.5,
+                        -5,
+                        false
+                    )
+                );
+
+                balls.push(
+                    createBall(
+                        source.x,
+                        source.y,
+                        4.5,
+                        -5,
+                        false
+                    )
+                );
+            }
+        }
+    }
+
+    if (type === "slow") {
+        // Timer handled by power state.
+    }
+
+    beep(900, 0.08, "sine", 0.04);
+
+    updateBuffs();
+}
+
+
+/* =========================================================
+   POWER TIMERS
+========================================================= */
+
+function updatePowers(dt) {
+    let changed = false;
+
+    for (const key of Object.keys(powers)) {
+        if (powers[key] > 0) {
+            powers[key] -= dt;
+            changed = true;
+
+            if (powers[key] <= 0) {
+                powers[key] = 0;
+
+                if (key === "big") {
+                    platform.w = platform.baseW;
+                }
+
+                if (key === "fire") {
+                    platform.fire = false;
+                }
+            }
+        }
+    }
+
+    if (changed) {
+        updateBuffs();
+    }
+}
+
+
+/* =========================================================
+   BUFF UI
+========================================================= */
+
+function updateBuffs() {
+    if (!buffsWrap) return;
+
+    buffsWrap.innerHTML = "";
+
+    const labels = {
+        big: "BIG",
+        fire: "FIRE",
+        multi: "MULTI",
+        slow: "SLOW"
+    };
+
+    for (const key of Object.keys(powers)) {
+        if (powers[key] <= 0) continue;
+
+        const div = document.createElement("div");
+
+        div.className =
+            `buff buff-${key}`;
+
+        div.textContent =
+            `${labels[key]} ${Math.ceil(powers[key] / 60)}`;
+
+        buffsWrap.appendChild(div);
+    }
+}
+
+
+/* =========================================================
+   PARTICLES
+========================================================= */
+
+function createParticles(x, y, color, amount = 10) {
+    for (let i = 0; i < amount; i++) {
+        const angle =
+            Math.random() * Math.PI * 2;
+
+        const speed =
+            Math.random() * 3 + 1;
+
+        particles.push({
+            x,
+            y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1,
+            decay:
+                Math.random() * 0.03 + 0.015,
+            size:
+                Math.random() * 3 + 1,
+            color
+        });
+    }
+}
+
+function updateParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        p.vx *= 0.98;
+        p.vy *= 0.98;
+
+        p.life -= p.decay * dt;
+
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+}
+
+
+/* =========================================================
+   DRAW BACKGROUND
+========================================================= */
+
+function drawBackground(time) {
+    ctx.fillStyle = "#050713";
+    ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
     );
-  }
 
+    for (const star of stars) {
+        const alpha =
+            star.a +
+            Math.sin(
+                time * star.speed
+            ) * 0.15;
 
-  // ----------------------------------------------------------
-  // BALLS
-  // ----------------------------------------------------------
+        ctx.globalAlpha =
+            Math.max(0.05, alpha);
 
-  for (const ball of balls) {
+        ctx.fillStyle = "#ffffff";
 
-    drawBall(
-      ball
-    );
-  }
+        ctx.beginPath();
+        ctx.arc(
+            star.x,
+            star.y,
+            star.r,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+    }
 
+    ctx.globalAlpha = 1;
 
-  // ----------------------------------------------------------
-  // PLATFORM
-  // ----------------------------------------------------------
+    // Subtle level pattern glow.
+    const gradient =
+        ctx.createRadialGradient(
+            canvas.width / 2,
+            250,
+            20,
+            canvas.width / 2,
+            250,
+            420
+        );
 
-  drawPlatform();
-
-
-  // ----------------------------------------------------------
-  // PARTICLES
-  // ----------------------------------------------------------
-
-  for (const particle of particles) {
-
-    ctx.globalAlpha =
-      particle.life;
-
-    ctx.fillStyle =
-      particle.color;
-
-    ctx.beginPath();
-
-    ctx.arc(
-      particle.x,
-      particle.y,
-      particle.size,
-      0,
-      Math.PI * 2
+    gradient.addColorStop(
+        0,
+        "rgba(70,100,255,0.08)"
     );
 
-    ctx.fill();
-  }
+    gradient.addColorStop(
+        1,
+        "rgba(0,0,0,0)"
+    );
 
-  ctx.globalAlpha = 1;
+    ctx.fillStyle = gradient;
+
+    ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+}
 
 
-  // ----------------------------------------------------------
-  // DEVELOPER HITBOXES
-  // ----------------------------------------------------------
+/* =========================================================
+   DRAW BRICKS
+========================================================= */
 
-  if (
-    devMode &&
-    devConfig.showHitboxes
-  ) {
+function drawBricks() {
+    for (const brick of bricks) {
+        if (!brick.alive) continue;
+
+        const color =
+            brickColors[brick.colorIndex];
+
+        ctx.save();
+
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = color;
+
+        ctx.fillStyle = color;
+
+        ctx.beginPath();
+
+        if (ctx.roundRect) {
+            ctx.roundRect(
+                brick.x,
+                brick.y,
+                brick.w,
+                brick.h,
+                5
+            );
+        } else {
+            ctx.rect(
+                brick.x,
+                brick.y,
+                brick.w,
+                brick.h
+            );
+        }
+
+        ctx.fill();
+
+        // Inner shine.
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle =
+            "rgba(255,255,255,0.22)";
+
+        ctx.fillRect(
+            brick.x + 3,
+            brick.y + 3,
+            brick.w - 6,
+            3
+        );
+
+        // HP indicator.
+        if (brick.maxHp > 1) {
+            ctx.fillStyle =
+                "rgba(0,0,0,0.35)";
+
+            const barW =
+                (brick.w - 8) *
+                (brick.hp / brick.maxHp);
+
+            ctx.fillRect(
+                brick.x + 4,
+                brick.y + brick.h - 5,
+                barW,
+                2
+            );
+        }
+
+        ctx.restore();
+    }
+}
+
+
+/* =========================================================
+   DRAW PLATFORM
+========================================================= */
+
+function drawPlatform() {
+    const x = platform.x;
+    const y = platform.y;
+    const w = platform.w;
+    const h = platform.h;
 
     ctx.save();
 
-    ctx.lineWidth = 1;
+    ctx.shadowBlur = 20;
 
-
-    // Platform
-
-    ctx.strokeStyle =
-      "#00ff88";
-
-    ctx.strokeRect(
-      platform.x -
-        platform.w / 2,
-      platform.y,
-      platform.w,
-      platform.h
-    );
-
-
-    // Bricks
-
-    ctx.strokeStyle =
-      "#ffcc00";
-
-    for (const brick of bricks) {
-
-      if (!brick.alive) {
-        continue;
-      }
-
-      ctx.strokeRect(
-        brick.x,
-        brick.y,
-        brick.w,
-        brick.h
-      );
+    if (platform.fire) {
+        ctx.shadowColor = "#ff5a00";
+        ctx.fillStyle = "#ff7a00";
+    } else {
+        ctx.shadowColor = "#00f5ff";
+        ctx.fillStyle = "#00d9ff";
     }
 
+    ctx.beginPath();
 
-    // Balls
+    if (ctx.roundRect) {
+        ctx.roundRect(
+            x,
+            y,
+            w,
+            h,
+            8
+        );
+    } else {
+        ctx.rect(x, y, w, h);
+    }
 
-    ctx.strokeStyle =
-      "#ff3366";
+    ctx.fill();
 
-    for (const ball of balls) {
+    ctx.shadowBlur = 0;
 
-      ctx.beginPath();
+    ctx.fillStyle =
+        "rgba(255,255,255,0.7)";
 
-      ctx.arc(
+    ctx.fillRect(
+        x + 8,
+        y + 3,
+        w - 16,
+        3
+    );
+
+    ctx.restore();
+}
+
+
+/* =========================================================
+   DRAW BALL
+========================================================= */
+
+function drawBall(ball) {
+    // Trail
+    for (let i = 0; i < ball.trail.length; i++) {
+        const point =
+            ball.trail[i];
+
+        const alpha =
+            i / ball.trail.length * 0.25;
+
+        ctx.fillStyle =
+            `rgba(100,220,255,${alpha})`;
+
+        ctx.beginPath();
+
+        ctx.arc(
+            point.x,
+            point.y,
+            ball.r * 0.6,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+    }
+
+    ctx.save();
+
+    if (powers.fire > 0) {
+        ctx.shadowColor = "#ff5a00";
+        ctx.shadowBlur = 25;
+
+        const gradient =
+            ctx.createRadialGradient(
+                ball.x - 2,
+                ball.y - 2,
+                1,
+                ball.x,
+                ball.y,
+                ball.r * 2
+            );
+
+        gradient.addColorStop(
+            0,
+            "#fff6a0"
+        );
+
+        gradient.addColorStop(
+            0.35,
+            "#ffb000"
+        );
+
+        gradient.addColorStop(
+            1,
+            "#ff3300"
+        );
+
+        ctx.fillStyle = gradient;
+    } else {
+        ctx.shadowColor = "#ffffff";
+        ctx.shadowBlur = 15;
+
+        ctx.fillStyle = "#ffffff";
+    }
+
+    ctx.beginPath();
+
+    ctx.arc(
         ball.x,
         ball.y,
         ball.r,
         0,
         Math.PI * 2
-      );
+    );
 
-      ctx.stroke();
-    }
+    ctx.fill();
 
     ctx.restore();
-  }
 }
 
 
-// ============================================================
-// DRAW BRICK
-// ============================================================
+/* =========================================================
+   DRAW BONUSES
+========================================================= */
 
-function drawBrick(
-  brick
-) {
+function drawBonuses() {
+    for (const bonus of bonuses) {
+        const colors = {
+            big: "#00f5d4",
+            fire: "#ff5a00",
+            multi: "#9b5de5",
+            slow: "#4dabf7"
+        };
 
-  const color =
-    brick.color;
+        const symbols = {
+            big: "B",
+            fire: "F",
+            multi: "M",
+            slow: "S"
+        };
 
+        const color =
+            colors[bonus.type];
 
-  // Glow
+        ctx.save();
 
-  ctx.save();
+        ctx.translate(
+            bonus.x + bonus.w / 2,
+            bonus.y + bonus.h / 2
+        );
 
-  ctx.shadowBlur = 16;
+        ctx.rotate(
+            bonus.rotation
+        );
 
-  ctx.shadowColor =
-    color;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = color;
 
-  ctx.fillStyle =
-    color;
+        ctx.fillStyle = color;
 
-  ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.arc(
+            0,
+            0,
+            10,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
 
-  ctx.fillRect(
-    brick.x,
-    brick.y,
-    brick.w,
-    brick.h
-  );
+        ctx.shadowBlur = 0;
 
-  ctx.restore();
+        ctx.fillStyle = "#07101c";
 
+        ctx.font =
+            "bold 12px Arial";
 
-  // Main brick
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
 
-  const gradient =
-    ctx.createLinearGradient(
-      brick.x,
-      brick.y,
-      brick.x,
-      brick.y +
-        brick.h
-    );
+        ctx.fillText(
+            symbols[bonus.type],
+            0,
+            1
+        );
 
-  gradient.addColorStop(
-    0,
-    color
-  );
-
-  gradient.addColorStop(
-    1,
-    "#111827"
-  );
-
-  ctx.fillStyle =
-    gradient;
-
-  ctx.fillRect(
-    brick.x,
-    brick.y,
-    brick.w,
-    brick.h
-  );
-
-
-  // Border
-
-  ctx.strokeStyle =
-    color;
-
-  ctx.lineWidth = 1;
-
-  ctx.strokeRect(
-    brick.x + 0.5,
-    brick.y + 0.5,
-    brick.w - 1,
-    brick.h - 1
-  );
-
-
-  // Highlight
-
-  ctx.fillStyle =
-    "rgba(255,255,255,0.2)";
-
-  ctx.fillRect(
-    brick.x + 3,
-    brick.y + 3,
-    brick.w - 6,
-    3
-  );
-
-
-  // Damage cracks
-
-  if (
-    brick.maxHp >= 2 &&
-    brick.hp <
-      brick.maxHp
-  ) {
-
-    ctx.strokeStyle =
-      "rgba(255,255,255,0.55)";
-
-    ctx.lineWidth = 1;
-
-    ctx.beginPath();
-
-    ctx.moveTo(
-      brick.x + 12,
-      brick.y + 4
-    );
-
-    ctx.lineTo(
-      brick.x + 22,
-      brick.y + 11
-    );
-
-    ctx.lineTo(
-      brick.x + 17,
-      brick.y + 18
-    );
-
-    ctx.stroke();
-
-
-    ctx.beginPath();
-
-    ctx.moveTo(
-      brick.x + 40,
-      brick.y + 4
-    );
-
-    ctx.lineTo(
-      brick.x + 34,
-      brick.y + 12
-    );
-
-    ctx.lineTo(
-      brick.x + 48,
-      brick.y + 18
-    );
-
-    ctx.stroke();
-  }
+        ctx.restore();
+    }
 }
 
 
-// ============================================================
-// DRAW BONUS
-// ============================================================
+/* =========================================================
+   DRAW PARTICLES
+========================================================= */
 
-function drawBonus(
-  bonus
-) {
+function drawParticles() {
+    for (const p of particles) {
+        ctx.globalAlpha =
+            Math.max(0, p.life);
 
-  ctx.save();
+        ctx.fillStyle = p.color;
 
-  ctx.translate(
-    bonus.x,
-    bonus.y
-  );
+        ctx.beginPath();
 
-  ctx.rotate(
-    bonus.ang
-  );
+        ctx.arc(
+            p.x,
+            p.y,
+            p.size,
+            0,
+            Math.PI * 2
+        );
 
-
-  ctx.shadowBlur = 18;
-
-  ctx.shadowColor =
-    bonus.color;
-
-  ctx.fillStyle =
-    bonus.color;
-
-  ctx.beginPath();
-
-  ctx.moveTo(
-    0,
-    -bonus.r
-  );
-
-  ctx.lineTo(
-    bonus.r,
-    0
-  );
-
-  ctx.lineTo(
-    0,
-    bonus.r
-  );
-
-  ctx.lineTo(
-    -bonus.r,
-    0
-  );
-
-  ctx.closePath();
-
-  ctx.fill();
-
-
-  ctx.fillStyle =
-    "#ffffff";
-
-  ctx.globalAlpha =
-    0.8;
-
-  ctx.beginPath();
-
-  ctx.arc(
-    0,
-    0,
-    4,
-    0,
-    Math.PI * 2
-  );
-
-  ctx.fill();
-
-
-  ctx.restore();
-}
-
-
-// ============================================================
-// DRAW BALL
-// ============================================================
-
-function drawBall(
-  ball
-) {
-
-  // Trail
-
-  if (
-    ball.trail &&
-    ball.trail.length > 1
-  ) {
-
-    for (
-      let i = 0;
-      i <
-      ball.trail.length;
-      i++
-    ) {
-
-      const point =
-        ball.trail[i];
-
-      const alpha =
-        i /
-        ball.trail.length;
-
-      ctx.globalAlpha =
-        alpha * 0.35;
-
-      ctx.fillStyle =
-        ball.fire
-          ? "#ff7b22"
-          : "#7ad7ff";
-
-      ctx.beginPath();
-
-      ctx.arc(
-        point.x,
-        point.y,
-        ball.r *
-          alpha,
-        0,
-        Math.PI * 2
-      );
-
-      ctx.fill();
+        ctx.fill();
     }
 
     ctx.globalAlpha = 1;
-  }
+}
 
 
-  // Ball
+/* =========================================================
+   DEVELOPER OVERLAY
+========================================================= */
 
-  const gradient =
-    ctx.createRadialGradient(
-      ball.x - 2,
-      ball.y - 2,
-      1,
-      ball.x,
-      ball.y,
-      ball.r * 2
-    );
+function drawDeveloperInfo() {
+    if (!devMode) return;
 
-  if (ball.fire) {
-
-    gradient.addColorStop(
-      0,
-      "#ffffff"
-    );
-
-    gradient.addColorStop(
-      0.3,
-      "#fff36b"
-    );
-
-    gradient.addColorStop(
-      0.7,
-      "#ff8a25"
-    );
-
-    gradient.addColorStop(
-      1,
-      "#ff3b00"
-    );
-
-  } else {
-
-    gradient.addColorStop(
-      0,
-      "#ffffff"
-    );
-
-    gradient.addColorStop(
-      0.35,
-      "#a9ecff"
-    );
-
-    gradient.addColorStop(
-      0.75,
-      "#4db9ff"
-    );
-
-    gradient.addColorStop(
-      1,
-      "#246cff"
-    );
-  }
-
-
-  ctx.save();
-
-  ctx.shadowBlur =
-    ball.fire
-      ? 24
-      : 16;
-
-  ctx.shadowColor =
-    ball.fire
-      ? "#ff5a00"
-      : "#55cfff";
-
-  ctx.fillStyle =
-    gradient;
-
-  ctx.beginPath();
-
-  ctx.arc(
-    ball.x,
-    ball.y,
-    ball.r,
-    0,
-    Math.PI * 2
-  );
-
-  ctx.fill();
-
-
-  // Fire tail
-
-  if (ball.fire) {
-
-    ctx.globalAlpha = 0.65;
+    ctx.save();
 
     ctx.fillStyle =
-      "#ffb000";
+        "rgba(0,0,0,0.55)";
 
-    ctx.beginPath();
-
-    ctx.moveTo(
-      ball.x -
-        ball.vx * 1.5,
-      ball.y -
-        ball.vy * 1.5
+    ctx.fillRect(
+        10,
+        10,
+        210,
+        48
     );
 
-    ctx.lineTo(
-      ball.x -
-        ball.vx * 0.4 +
-        ball.vy * 0.35,
-      ball.y -
-        ball.vy * 0.4 -
-        ball.vx * 0.35
+    ctx.font =
+        "bold 12px Arial";
+
+    ctx.fillStyle =
+        "#00ffcc";
+
+    ctx.fillText(
+        `DEV • LEVEL ${state.level}`,
+        20,
+        29
     );
 
-    ctx.lineTo(
-      ball.x -
-        ball.vx * 0.4 -
-        ball.vy * 0.35,
-      ball.y -
-        ball.vy * 0.4 +
-        ball.vx * 0.35
+    ctx.fillStyle =
+        "#ffffff";
+
+    ctx.fillText(
+        currentPatternName,
+        20,
+        47
     );
 
-    ctx.closePath();
-
-    ctx.fill();
-  }
-
-  ctx.restore();
-
-  ctx.globalAlpha = 1;
+    ctx.restore();
 }
 
 
-// ============================================================
-// DRAW PLATFORM
-// ============================================================
+/* =========================================================
+   HITBOXES
+========================================================= */
 
-function drawPlatform() {
+function drawHitboxes() {
+    if (!devMode || !devConfig.showHitboxes) {
+        return;
+    }
 
-  const x =
-    platform.x -
-    platform.w / 2;
+    ctx.save();
 
-  const y =
-    platform.y;
-
-
-  ctx.save();
-
-  ctx.shadowBlur = 18;
-
-  ctx.shadowColor =
-    "#4da6ff";
-
-
-  const gradient =
-    ctx.createLinearGradient(
-      x,
-      y,
-      x,
-      y + platform.h
-    );
-
-  gradient.addColorStop(
-    0,
-    "#8ee7ff"
-  );
-
-  gradient.addColorStop(
-    0.45,
-    "#438dff"
-  );
-
-  gradient.addColorStop(
-    1,
-    "#1e4dcb"
-  );
-
-  ctx.fillStyle =
-    gradient;
-
-  ctx.beginPath();
-
-  ctx.roundRect(
-    x,
-    y,
-    platform.w,
-    platform.h,
-    7
-  );
-
-  ctx.fill();
-
-
-  ctx.fillStyle =
-    "rgba(255,255,255,0.35)";
-
-  ctx.fillRect(
-    x + 8,
-    y + 3,
-    platform.w - 16,
-    2
-  );
-
-
-  if (powers.big) {
+    ctx.lineWidth = 1;
 
     ctx.strokeStyle =
-      "#6fffd0";
-
-    ctx.lineWidth = 2;
+        "rgba(0,255,0,0.8)";
 
     ctx.strokeRect(
-      x - 2,
-      y - 2,
-      platform.w + 4,
-      platform.h + 4
-    );
-  }
-
-
-  ctx.restore();
-}
-
-
-// ============================================================
-// SCORE
-// ============================================================
-
-function updateScore() {
-
-  scoreEl.textContent =
-    state.score;
-
-  const best =
-    Number(
-      localStorage.getItem(
-        "neonBreakoutBest"
-      ) || 0
+        platform.x,
+        platform.y,
+        platform.w,
+        platform.h
     );
 
-  if (
-    state.score >
-    best
-  ) {
-
-    localStorage.setItem(
-      "neonBreakoutBest",
-      state.score
-    );
-  }
-
-  bestEl.textContent =
-    Math.max(
-      best,
-      state.score
-    );
-}
-
-
-// ============================================================
-// START GAME
-// ============================================================
-
-function startGame(
-  mode = "player",
-  level = 1
-) {
-
-  initAudio();
-
-  devMode =
-    mode === "developer";
-
-
-  state.running = true;
-
-  state.score = 0;
-
-  state.level =
-    Math.max(
-      1,
-      Math.floor(
-        Number(level) || 1
-      )
-    );
-
-
-  if (
-    devMode &&
-    devConfig.infiniteLives
-  ) {
-
-    state.lives =
-      Infinity;
-
-  } else {
-
-    state.lives = 3;
-  }
-
-
-  balls.length = 0;
-  bricks.length = 0;
-  bonuses.length = 0;
-  particles.length = 0;
-
-  powers = {};
-
-
-  platform.w =
-    platform.baseW;
-
-  platform.x =
-    W / 2;
-
-  platform.fire =
-    false;
-
-  platform.fireTimer =
-    0;
-
-
-  buildLevel(
-    state.level
-  );
-
-  resetBall();
-
-
-  overlay.classList.add(
-    "hidden"
-  );
-
-  devPanel.classList.toggle(
-    "hidden",
-    !devMode
-  );
-
-
-  updateScore();
-
-  levelEl.textContent =
-    state.level;
-
-
-  livesEl.textContent =
-    devMode &&
-    devConfig.infiniteLives
-      ? "∞"
-      : state.lives;
-
-
-  if (devMode) {
-
-    devLevelInput.value =
-      state.level;
-  }
-}
-
-
-// ============================================================
-// DEVELOPER LEVEL LOADER
-// ============================================================
-
-function loadDeveloperLevel(
-  level
-) {
-
-  if (!devMode) {
-    return;
-  }
-
-
-  level =
-    Math.max(
-      1,
-      Math.min(
-        9999,
-        Math.floor(
-          Number(level) || 1
-        )
-      )
-    );
-
-
-  state.running = true;
-
-  state.level =
-    level;
-
-
-  balls.length = 0;
-  bricks.length = 0;
-  bonuses.length = 0;
-  particles.length = 0;
-
-  powers = {};
-
-
-  platform.w =
-    platform.baseW;
-
-  platform.x =
-    W / 2;
-
-
-  buildLevel(
-    level
-  );
-
-  resetBall();
-
-
-  devLevelInput.value =
-    level;
-
-  levelEl.textContent =
-    level;
-
-
-  livesEl.textContent =
-    devConfig.infiniteLives
-      ? "∞"
-      : state.lives;
-
-
-  overlay.classList.add(
-    "hidden"
-  );
-}
-
-
-// ============================================================
-// GAME OVER
-// ============================================================
-
-function gameOver() {
-
-  state.running = false;
-
-  sfx("gameover");
-
-  overlayTitle.textContent =
-    "GAME OVER";
-
-  overlaySubtitle.textContent =
-    `Ты дошёл до уровня ${state.level}`;
-
-  overlayHint.textContent =
-    `Счёт: ${state.score}`;
-
-  startBtn.textContent =
-    "🔄 Играть снова";
-
-  developerBtn.textContent =
-    "🛠 Developer";
-
-  devPanel.classList.add(
-    "hidden"
-  );
-
-  overlay.classList.remove(
-    "hidden"
-  );
-}
-
-
-// ============================================================
-// START BUTTON
-// ============================================================
-
-startBtn.addEventListener(
-  "click",
-  () => {
-
-    overlayTitle.textContent =
-      "NEON BREAKOUT";
-
-    overlaySubtitle.textContent =
-      "Разбей все блоки и доберись до следующего уровня";
-
-    overlayHint.textContent =
-      "Управление: ← → / A D / мышь / касание";
-
-    startBtn.textContent =
-      "🎮 Играть";
-
-    startGame(
-      "player",
-      1
-    );
-  }
-);
-
-
-// ============================================================
-// DEVELOPER BUTTON
-// ============================================================
-
-developerBtn.addEventListener(
-  "click",
-  () => {
-
-    startGame(
-      "developer",
-      1
-    );
-  }
-);
-
-
-// ============================================================
-// DEVELOPER CONTROLS
-// ============================================================
-
-devLoadLevel.addEventListener(
-  "click",
-  () => {
-
-    loadDeveloperLevel(
-      devLevelInput.value
-    );
-  }
-);
-
-
-devPrevLevel.addEventListener(
-  "click",
-  () => {
-
-    loadDeveloperLevel(
-      state.level - 1
-    );
-  }
-);
-
-
-devNextLevel.addEventListener(
-  "click",
-  () => {
-
-    loadDeveloperLevel(
-      state.level + 1
-    );
-  }
-);
-
-
-devRestart.addEventListener(
-  "click",
-  () => {
-
-    loadDeveloperLevel(
-      state.level
-    );
-  }
-);
-
-
-devSkip.addEventListener(
-  "click",
-  () => {
-
-    loadDeveloperLevel(
-      state.level + 1
-    );
-  }
-);
-
-
-devInfiniteLives.addEventListener(
-  "change",
-  () => {
-
-    devConfig.infiniteLives =
-      devInfiniteLives.checked;
-
-
-    if (devMode) {
-
-      livesEl.textContent =
-        devConfig.infiniteLives
-          ? "∞"
-          : state.lives;
-    }
-  }
-);
-
-
-devGodMode.addEventListener(
-  "change",
-  () => {
-
-    devConfig.godMode =
-      devGodMode.checked;
-  }
-);
-
-
-devHitboxes.addEventListener(
-  "change",
-  () => {
-
-    devConfig.showHitboxes =
-      devHitboxes.checked;
-  }
-);
-
-
-devSlowMotion.addEventListener(
-  "change",
-  () => {
-
-    devConfig.slowMotion =
-      devSlowMotion.checked;
-  }
-);
-
-
-devBossFrequency.addEventListener(
-  "change",
-  () => {
-
-    const value =
-      devBossFrequency.value;
-
-
-    devConfig.bossFrequency =
-      value === "random"
-        ? "random"
-        : Number(value);
-  }
-);
-
-
-devExit.addEventListener(
-  "click",
-  () => {
-
-    devMode = false;
-
-    devPanel.classList.add(
-      "hidden"
-    );
-
-    overlayTitle.textContent =
-      "NEON BREAKOUT";
-
-    overlaySubtitle.textContent =
-      "Разбей все блоки и доберись до следующего уровня";
-
-    overlayHint.textContent =
-      "Управление: ← → / A D / мышь / касание";
-
-    startBtn.textContent =
-      "🎮 Играть";
-
-    startGame(
-      "player",
-      1
-    );
-  }
-);
-
-
-// ============================================================
-// KEYBOARD
-// ============================================================
-
-window.addEventListener(
-  "keydown",
-  event => {
-
-    if (
-      event.key === "ArrowLeft" ||
-      event.key.toLowerCase() === "a"
-    ) {
-
-      keys.left = true;
-
-      event.preventDefault();
+    ctx.strokeStyle =
+        "rgba(255,0,0,0.8)";
+
+    for (const brick of bricks) {
+        if (!brick.alive) continue;
+
+        ctx.strokeRect(
+            brick.x,
+            brick.y,
+            brick.w,
+            brick.h
+        );
     }
 
+    ctx.strokeStyle =
+        "rgba(255,255,0,0.9)";
 
-    if (
-      event.key === "ArrowRight" ||
-      event.key.toLowerCase() === "d"
-    ) {
+    for (const ball of balls) {
+        ctx.beginPath();
 
-      keys.right = true;
-
-      event.preventDefault();
-    }
-
-
-    if (
-      event.code === "Space"
-    ) {
-
-      event.preventDefault();
-
-      if (
-        !state.running
-      ) {
-
-        startGame(
-          "player",
-          1
+        ctx.arc(
+            ball.x,
+            ball.y,
+            ball.r,
+            0,
+            Math.PI * 2
         );
 
-        return;
-      }
-
-      releaseStuck();
+        ctx.stroke();
     }
 
-
-    if (
-      event.key === "ArrowUp" ||
-      event.key.toLowerCase() === "w"
-    ) {
-
-      releaseStuck();
-    }
-  }
-);
+    ctx.restore();
+}
 
 
-window.addEventListener(
-  "keyup",
-  event => {
+/* =========================================================
+   HUD
+========================================================= */
 
-    if (
-      event.key === "ArrowLeft" ||
-      event.key.toLowerCase() === "a"
-    ) {
+function updateHUD() {
+    scoreEl.textContent =
+        state.score;
 
-      keys.left = false;
-    }
+    levelEl.textContent =
+        state.level;
 
+    livesEl.textContent =
+        state.lives === Infinity
+            ? "∞"
+            : state.lives;
 
-    if (
-      event.key === "ArrowRight" ||
-      event.key.toLowerCase() === "d"
-    ) {
-
-      keys.right = false;
-    }
-  }
-);
+    bestEl.textContent =
+        state.best;
+}
 
 
-// ============================================================
-// MOUSE
-// ============================================================
+/* =========================================================
+   MAIN UPDATE
+========================================================= */
 
-canvas.addEventListener(
-  "mousemove",
-  event => {
+let lastTime = performance.now();
 
-    const rect =
-      canvas.getBoundingClientRect();
+function update(time) {
+    const rawDt =
+        Math.min(
+            2,
+            (time - lastTime) / 16.6667
+        );
 
+    lastTime = time;
 
-    mouseX =
-      (
-        (event.clientX -
-          rect.left) /
-        rect.width
-      ) * W;
-  }
-);
+    const timeScale =
+        devMode &&
+        devConfig.slowMotion
+            ? 0.35
+            : powers.slow > 0
+                ? 0.55
+                : 1;
 
-
-canvas.addEventListener(
-  "click",
-  () => {
+    const dt =
+        rawDt * timeScale;
 
     if (state.running) {
+        updatePlatform(dt);
+        updatePowers(dt);
+        updateBonuses(dt);
+        updateParticles(dt);
 
-      releaseStuck();
-    }
-  }
-);
+        for (
+            let i = balls.length - 1;
+            i >= 0;
+            i--
+        ) {
+            const alive =
+                updateBall(
+                    balls[i],
+                    dt
+                );
 
+            if (!alive) {
+                balls.splice(i, 1);
+            }
+        }
 
-// ============================================================
-// TOUCH
-// ============================================================
+        if (balls.length === 0) {
+            loseBall();
+        }
 
-canvas.addEventListener(
-  "touchstart",
-  event => {
-
-    initAudio();
-
-    releaseStuck();
-
-    event.preventDefault();
-
-  },
-  {
-    passive: false
-  }
-);
-
-
-canvas.addEventListener(
-  "touchmove",
-  event => {
-
-    const touch =
-      event.touches[0];
-
-    if (!touch) {
-      return;
+        checkLevelComplete();
+        updateHUD();
     }
 
-    const rect =
-      canvas.getBoundingClientRect();
+    draw(time);
+
+    requestAnimationFrame(update);
+}
 
 
-    mouseX =
-      (
-        (touch.clientX -
-          rect.left) /
-        rect.width
-      ) * W;
+/* =========================================================
+   MAIN DRAW
+========================================================= */
+
+function draw(time) {
+    drawBackground(time);
+
+    drawBricks();
+    drawBonuses();
+    drawParticles();
+    drawPlatform();
+
+    for (const ball of balls) {
+        drawBall(ball);
+    }
+
+    drawDeveloperInfo();
+    drawHitboxes();
+}
 
 
-    event.preventDefault();
+/* =========================================================
+   UI EVENTS
+========================================================= */
 
-  },
-  {
-    passive: false
-  }
-);
+startBtn.addEventListener("click", () => {
+    startGame("player", 1);
+});
 
+developerBtn.addEventListener("click", () => {
+    startGame("developer", 1);
+});
 
-// ============================================================
-// MUTE
-// ============================================================
+devLoad.addEventListener("click", () => {
+    loadDeveloperLevel(
+        Number(devLevel.value)
+    );
+});
 
-muteBtn.addEventListener(
-  "click",
-  () => {
-
-    muted =
-      !muted;
-
-    muteBtn.textContent =
-      muted
-        ? "🔇"
-        : "🔊";
-  }
-);
-
-
-// ============================================================
-// RESIZE
-// ============================================================
-
-function fitCanvas() {
-
-  const maxWidth =
-    Math.min(
-      window.innerWidth,
-      800
+devPrev.addEventListener("click", () => {
+    loadDeveloperLevel(
+        Math.max(
+            1,
+            state.level - 1
+        )
     );
 
-  canvas.style.width =
-    `${maxWidth}px`;
+    devLevel.value =
+        state.level;
+});
 
-  canvas.style.height =
-    `${maxWidth * 0.75}px`;
-}
+devNext.addEventListener("click", () => {
+    loadDeveloperLevel(
+        state.level + 1
+    );
+
+    devLevel.value =
+        state.level;
+});
+
+devRestart.addEventListener("click", () => {
+    restartLevel();
+});
+
+devSkip.addEventListener("click", () => {
+    skipLevel();
+
+    devLevel.value =
+        state.level;
+});
 
 
-window.addEventListener(
-  "resize",
-  fitCanvas
+/* =========================================================
+   DEV SETTINGS
+========================================================= */
+
+devInfiniteLives.addEventListener(
+    "change",
+    () => {
+        devConfig.infiniteLives =
+            devInfiniteLives.checked;
+
+        if (
+            devConfig.infiniteLives ||
+            devConfig.godMode
+        ) {
+            state.lives = Infinity;
+        } else if (
+            state.lives === Infinity
+        ) {
+            state.lives = 3;
+        }
+
+        updateHUD();
+    }
 );
 
-fitCanvas();
+devGodMode.addEventListener(
+    "change",
+    () => {
+        devConfig.godMode =
+            devGodMode.checked;
+
+        if (
+            devConfig.godMode ||
+            devConfig.infiniteLives
+        ) {
+            state.lives = Infinity;
+        } else if (
+            state.lives === Infinity
+        ) {
+            state.lives = 3;
+        }
+
+        updateHUD();
+    }
+);
+
+devHitboxes.addEventListener(
+    "change",
+    () => {
+        devConfig.showHitboxes =
+            devHitboxes.checked;
+    }
+);
+
+devSlowMotion.addEventListener(
+    "change",
+    () => {
+        devConfig.slowMotion =
+            devSlowMotion.checked;
+    }
+);
+
+devBossFrequency.addEventListener(
+    "change",
+    () => {
+        const value =
+            devBossFrequency.value;
+
+        if (value === "random") {
+            devConfig.bossFrequency =
+                "random";
+        } else {
+            devConfig.bossFrequency =
+                Number(value);
+        }
+    }
+);
+
+devExit.addEventListener(
+    "click",
+    () => {
+        devMode = false;
+
+        devPanel.style.display =
+            "none";
+
+        startGame("player", 1);
+    }
+);
 
 
-// ============================================================
-// INITIAL STATE
-// ============================================================
+/* =========================================================
+   MUTE
+========================================================= */
 
-levelEl.textContent = "1";
-livesEl.textContent = "3";
+const muteBtn =
+    document.getElementById("muteBtn");
 
-updateScore();
+if (muteBtn) {
+    muteBtn.addEventListener(
+        "click",
+        () => {
+            muted = !muted;
 
-
-// ============================================================
-// GAME LOOP
-// ============================================================
-
-function loop() {
-
-  update();
-
-  draw();
-
-  requestAnimationFrame(
-    loop
-  );
+            muteBtn.textContent =
+                muted
+                    ? "🔇"
+                    : "🔊";
+        }
+    );
 }
 
-loop();
+
+/* =========================================================
+   START
+========================================================= */
+
+updateHUD();
+
+overlayTitle.textContent =
+    "BREAKOUT";
+
+overlaySubtitle.textContent =
+    "Break the wall. Survive the levels.";
+
+startBtn.textContent =
+    "PLAY";
+
+developerBtn.textContent =
+    "DEVELOPER MODE";
+
+requestAnimationFrame(update);
