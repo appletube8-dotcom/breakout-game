@@ -186,13 +186,13 @@ function explode(x, y, color, n = 12) {
 // ---- Управление ----
 const keys = {};
 document.addEventListener('keydown', e => {
-  keys[e.key.toLowerCase()] = true;
-  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd' || e.key === ' ') {
+  keys[e.code] = true;
+  if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space', 'KeyW', 'ArrowUp'].includes(e.code)) {
     e.preventDefault();
   }
-  if (e.key === ' ' && !state.running) startGame();
+  if (e.code === 'Space' && !state.running) startGame();
 });
-document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+document.addEventListener('keyup', e => { keys[e.code] = false; });
 
 document.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
@@ -216,6 +216,8 @@ canvas.addEventListener('touchmove', e => {
   platform.x = Math.max(platform.w / 2, Math.min(W - platform.w / 2, platform.x));
   e.preventDefault();
 }, { passive: false });
+
+canvas.addEventListener('mousedown', () => releaseStuck());
 
 function releaseStuck() {
   let any = false;
@@ -266,12 +268,68 @@ function applyBonus(type) {
 // ---- Отладочная панель бонусов не нужна, соберём в отдельный список ----
 let activeBuffs = [];
 
+function circleRectCollision(ball, brick) {
+  const left = brick.x - brick.w / 2;
+  const right = brick.x + brick.w / 2;
+  const top = brick.y - brick.h / 2;
+  const bottom = brick.y + brick.h / 2;
+  const closestX = Math.max(left, Math.min(ball.x, right));
+  const closestY = Math.max(top, Math.min(ball.y, bottom));
+  let dx = ball.x - closestX;
+  let dy = ball.y - closestY;
+  const distanceSquared = dx * dx + dy * dy;
+
+  if (distanceSquared > ball.r * ball.r) return null;
+
+  // Центр мяча внутри кирпича: выбираем ближайшую грань, чтобы вытолкнуть его наружу.
+  if (distanceSquared === 0) {
+    const distances = [ball.x - left, right - ball.x, ball.y - top, bottom - ball.y];
+    const minimum = Math.min(...distances);
+    if (minimum === distances[0]) return { nx: -1, ny: 0, push: ball.r + minimum };
+    if (minimum === distances[1]) return { nx: 1, ny: 0, push: ball.r + minimum };
+    if (minimum === distances[2]) return { nx: 0, ny: -1, push: ball.r + minimum };
+    return { nx: 0, ny: 1, push: ball.r + minimum };
+  }
+
+  const distance = Math.sqrt(distanceSquared);
+  dx /= distance;
+  dy /= distance;
+  return { nx: dx, ny: dy, push: ball.r - distance };
+}
+
+function keepBallMovingVertically(ball) {
+  const speed = Math.hypot(ball.vx, ball.vy);
+  const minimumVertical = speed * 0.32;
+  if (speed === 0 || Math.abs(ball.vy) >= minimumVertical) return;
+
+  const horizontalDirection = Math.sign(ball.vx) || 1;
+  const verticalDirection = Math.sign(ball.vy) || -1;
+  ball.vy = verticalDirection * minimumVertical;
+  ball.vx = horizontalDirection * Math.sqrt(speed * speed - minimumVertical * minimumVertical);
+}
+
+function hitBrick(ball, brick) {
+  brick.hp--;
+  const color = brick.pal;
+  explode(ball.x, ball.y, color, 10);
+  state.score += 50;
+  sfx.brick(brick.maxHp);
+
+  if (brick.hp <= 0) {
+    brick.alive = false;
+    state.score += 100;
+    spawnBonus(brick.x, brick.y);
+    explode(brick.x, brick.y, color, 18);
+  }
+  updateScore();
+}
+
 // ---- Логика ----
 function update() {
   // Платформа по клавишам
   let dir = 0;
-  if (keys['a'] || keys['arrowleft']) dir -= 1;
-  if (keys['d'] || keys['arrowright']) dir += 1;
+  if (keys['KeyA'] || keys['ArrowLeft']) dir -= 1;
+  if (keys['KeyD'] || keys['ArrowRight']) dir += 1;
   if (dir !== 0) {
     platform.x += dir * platform.speed;
   }
@@ -285,62 +343,51 @@ function update() {
       b.y = platform.y - b.r - 1;
       continue;
     }
-    b.x += b.vx;
-    b.y += b.vy;
+    // Небольшие подшаги предотвращают пролетание через угол между кадрами.
+    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(b.vx), Math.abs(b.vy)) / 3));
+    const hitThisFrame = new Set();
+    for (let step = 0; step < steps; step++) {
+      b.x += b.vx / steps;
+      b.y += b.vy / steps;
 
-    // стенки
-    if (b.x - b.r < 0) { b.x = b.r; b.vx = Math.abs(b.vx); sfx.wall(); }
-    if (b.x + b.r > W) { b.x = W - b.r; b.vx = -Math.abs(b.vx); sfx.wall(); }
-    if (b.y - b.r < 0) { b.y = b.r; b.vy = Math.abs(b.vy); sfx.wall(); }
+      if (b.x - b.r < 0) { b.x = b.r; b.vx = Math.abs(b.vx); sfx.wall(); }
+      if (b.x + b.r > W) { b.x = W - b.r; b.vx = -Math.abs(b.vx); sfx.wall(); }
+      if (b.y - b.r < 0) { b.y = b.r; b.vy = Math.abs(b.vy); sfx.wall(); }
 
-    // платформа
-    if (b.vy > 0 &&
-        b.y + b.r >= platform.y - platform.h / 2 &&
-        b.y + b.r <= platform.y + platform.h / 2 + 10 &&
-        b.x >= platform.x - platform.w / 2 &&
-        b.x <= platform.x + platform.w / 2) {
-      const hit = (b.x - platform.x) / (platform.w / 2);
-      const angle = hit * (Math.PI / 3);
-      const speed = Math.hypot(b.vx, b.vy) * 1.02;
-      const maxSpeed = 11;
-      const sp = Math.min(speed, maxSpeed);
-      b.vx = Math.sin(angle) * sp;
-      b.vy = -Math.abs(Math.cos(angle) * sp);
-      b.y = platform.y - platform.h / 2 - b.r;
-      explode(b.x, platform.y - platform.h / 2, '#7ad7ff', 6);
-      sfx.bounce();
-    }
+      if (b.vy > 0 &&
+          b.y + b.r >= platform.y - platform.h / 2 &&
+          b.y + b.r <= platform.y + platform.h / 2 + 10 &&
+          b.x >= platform.x - platform.w / 2 &&
+          b.x <= platform.x + platform.w / 2) {
+        const hit = (b.x - platform.x) / (platform.w / 2);
+        const angle = hit * (Math.PI / 3);
+        const speed = Math.min(Math.hypot(b.vx, b.vy) * 1.02, 11);
+        b.vx = Math.sin(angle) * speed;
+        b.vy = -Math.abs(Math.cos(angle) * speed);
+        b.y = platform.y - platform.h / 2 - b.r;
+        explode(b.x, platform.y - platform.h / 2, '#7ad7ff', 6);
+        sfx.bounce();
+      }
 
-    // кирпичи
-    for (const br of bricks) {
-      if (!br.alive) continue;
-      if (b.x > br.x - br.w / 2 && b.x < br.x + br.w / 2 &&
-          b.y > br.y - br.h / 2 && b.y < br.y + br.h / 2) {
-        br.hp--;
-        const color = br.pal;
-        explode(b.x, b.y, color, 10);
+      for (const br of bricks) {
+        if (!br.alive || hitThisFrame.has(br)) continue;
+        const collision = circleRectCollision(b, br);
+        if (!collision) continue;
 
+        hitThisFrame.add(br);
+        hitBrick(b, br);
         if (!b.fire) {
-          // определяем, с какой стороны столкнулись
-          const overlapL = (b.x + b.r) - (br.x - br.w / 2);
-          const overlapR = (br.x + br.w / 2) - (b.x - b.r);
-          const overlapT = (b.y + b.r) - (br.y - br.h / 2);
-          const overlapB = (br.y + br.h / 2) - (b.y - b.r);
-          const min = Math.min(overlapL, overlapR, overlapT, overlapB);
-          if (min === overlapL || min === overlapR) b.vx = -b.vx;
-          else b.vy = -b.vy;
+          // Сначала выводим мяч наружу, затем отражаем его по нормали столкновения.
+          b.x += collision.nx * (collision.push + 0.01);
+          b.y += collision.ny * (collision.push + 0.01);
+          const dot = b.vx * collision.nx + b.vy * collision.ny;
+          if (dot < 0) {
+            b.vx -= 2 * dot * collision.nx;
+            b.vy -= 2 * dot * collision.ny;
+          }
+          keepBallMovingVertically(b);
         }
-
-        state.score += 50;
-        sfx.brick(br.maxHp);
-        if (br.hp <= 0) {
-          br.alive = false;
-          state.score += 100;
-          spawnBonus(br.x, br.y);
-          explode(br.x, br.y, color, 18);
-        }
-        updateScore();
-        break; // один кирпич за тик на мяч
+        break;
       }
     }
   }
@@ -366,9 +413,9 @@ function update() {
   }
 
   // отпустить мячи (прилипшие) — по пробелу или клику
-  if (keys[' '] || keys['w'] || keys['arrowup']) {
+  if (keys['Space'] || keys['KeyW'] || keys['ArrowUp']) {
     releaseStuck();
-    keys[' '] = false; keys['arrowup'] = false; keys['w'] = false;
+    keys['Space'] = false; keys['ArrowUp'] = false; keys['KeyW'] = false;
   }
 
   // бонусы
@@ -411,8 +458,6 @@ function update() {
     levelEl.textContent = state.level;
     buildLevel(state.level);
     resetBall();
-    spawnBalls(1);
-    balls.forEach(b => b.stuck = false);
     sfx.win();
   }
 }
