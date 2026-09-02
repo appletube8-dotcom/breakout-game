@@ -916,52 +916,19 @@ function updateBuffs() {
         div.textContent =
             letter + " " + Math.ceil(activePowers[type] / 60);
 
+        const color = getBonusColor(type);
+
         div.style.cssText =
             "display:inline-flex;" +
             "align-items:center;" +
             "justify-content:center;" +
             "margin:3px;" +
             "padding:4px 8px;" +
-            "border:1px solid " + getBonusColor(type) + ";" +
-            "color:" + getBonusColor(type) + ";" +
+            "border:1px solid " + color + ";" +
+            "color:" + color + ";" +
             "border-radius:8px;" +
             "font:700 11px Arial;" +
-            "box-shadow:0 0 10px " + getBonusColor(type) + ";";
-
-        buffsWrap.appendChild(div);
-    }
-}
-    if (!buffsWrap) return;
-
-    buffsWrap.innerHTML = "";
-
-    const powers = [
-        ["big", "B"],
-        ["fire", "F"],
-        ["multi", "M"],
-        ["slow", "S"]
-    ];
-
-    for (const [type, letter] of powers) {
-        if (activePowers[type] <= 0) continue;
-
-        const div = document.createElement("div");
-
-        div.textContent =
-            `${letter} ${Math.ceil(activePowers[type] / 60)}`;
-
-        div.style.cssText = `
-            display:inline-flex;
-            align-items:center;
-            justify-content:center;
-            margin:3px;
-            padding:4px 8px;
-            border:1px solid ${getBonusColor(type)};
-            color:${getBonusColor(type)};
-            border-radius:8px;
-            font:700 11px Arial;
-            box-shadow:0 0 10px ${getBonusColor(type)};
-        `;
+            "box-shadow:0 0 10px " + color + ";";
 
         buffsWrap.appendChild(div);
     }
