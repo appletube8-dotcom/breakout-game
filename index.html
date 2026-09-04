@@ -9,6 +9,8 @@
 
 <body>
 
+  <div id="app-layout">
+
   <div id="game-wrap">
 
     <!-- HUD -->
@@ -66,143 +68,167 @@
       </div>
     </div>
 
-    <!-- DEVELOPER PANEL -->
-    <div id="devPanel" class="dev-panel hidden">
+    <!-- BUFFS -->
+    <div id="buffsWrap"></div>
 
-      <div class="dev-title">
-        🛠 DEVELOPER MODE
-      </div>
+  </div>
 
-      <div class="dev-section">
+  <!-- DEVELOPER PANEL: вынесена за пределы game-wrap, чтобы не перекрывать
+       игровое поле. Отдельная колонка сбоку, а не оверлей поверх канваса. -->
+  <div id="devPanel" class="dev-panel hidden">
 
-        <label>
-          Уровень
+    <div class="dev-title">
+      🛠 DEVELOPER MODE
+    </div>
 
-          <input
-            id="devLevelInput"
-            type="number"
-            min="1"
-            max="9999"
-            value="1"
-          >
-        </label>
+    <div class="dev-section">
 
-        <button id="devLoadLevel" type="button">
-          Загрузить уровень
-        </button>
+      <label>
+        Уровень
 
-      </div>
+        <input
+          id="devLevelInput"
+          type="number"
+          min="1"
+          max="9999"
+          value="1"
+        >
+      </label>
 
-      <div class="dev-row">
-
-        <button id="devPrevLevel" type="button">
-          ← Назад
-        </button>
-
-        <button id="devNextLevel" type="button">
-          Вперёд →
-        </button>
-
-      </div>
-
-      <div class="dev-row">
-
-        <button id="devRestart" type="button">
-          ↻ Restart
-        </button>
-
-        <button id="devSkip" type="button">
-          ⏭ Skip
-        </button>
-
-      </div>
-
-      <div class="dev-section">
-
-        <label class="dev-checkbox">
-          <input
-            id="devInfiniteLives"
-            type="checkbox"
-            checked
-          >
-
-          <span>∞ Бесконечные жизни</span>
-        </label>
-
-        <label class="dev-checkbox">
-          <input
-            id="devGodMode"
-            type="checkbox"
-          >
-
-          <span>🛡 God Mode</span>
-        </label>
-
-        <label class="dev-checkbox">
-          <input
-            id="devHitboxes"
-            type="checkbox"
-          >
-
-          <span>▣ Show Hitboxes</span>
-        </label>
-
-        <label class="dev-checkbox">
-          <input
-            id="devSlowMotion"
-            type="checkbox"
-          >
-
-          <span>🐌 Slow Motion</span>
-        </label>
-
-      </div>
-
-      <div class="dev-section">
-
-        <label>
-          Частота боссов
-
-          <select id="devBossFrequency">
-
-            <option value="2">
-              Каждые 2 уровня
-            </option>
-
-            <option value="3">
-              Каждые 3 уровня
-            </option>
-
-            <option value="5" selected>
-              Каждые 5 уровней
-            </option>
-
-            <option value="10">
-              Каждые 10 уровней
-            </option>
-
-            <option value="random">
-              Random
-            </option>
-
-          </select>
-
-        </label>
-
-      </div>
-
-      <button
-        id="devExit"
-        type="button"
-        class="dev-exit"
-      >
-        ← Выйти из Developer
+      <button id="devLoadLevel" type="button">
+        Загрузить уровень
       </button>
 
     </div>
 
-    <!-- BUFFS -->
-    <div id="buffsWrap"></div>
+    <div class="dev-row">
+
+      <button id="devPrevLevel" type="button">
+        ← Назад
+      </button>
+
+      <button id="devNextLevel" type="button">
+        Вперёд →
+      </button>
+
+    </div>
+
+    <div class="dev-row">
+
+      <button id="devRestart" type="button">
+        ↻ Restart
+      </button>
+
+      <button id="devSkip" type="button">
+        ⏭ Skip
+      </button>
+
+    </div>
+
+    <div class="dev-section">
+
+      <label class="dev-checkbox">
+        <input
+          id="devInfiniteLives"
+          type="checkbox"
+          checked
+        >
+
+        <span>∞ Бесконечные жизни</span>
+      </label>
+
+      <label class="dev-checkbox">
+        <input
+          id="devGodMode"
+          type="checkbox"
+        >
+
+        <span>🛡 God Mode</span>
+      </label>
+
+      <label class="dev-checkbox">
+        <input
+          id="devHitboxes"
+          type="checkbox"
+        >
+
+        <span>▣ Show Hitboxes</span>
+      </label>
+
+      <label class="dev-checkbox">
+        <input
+          id="devSlowMotion"
+          type="checkbox"
+        >
+
+        <span>🐌 Slow Motion</span>
+      </label>
+
+    </div>
+
+    <div class="dev-section">
+
+      <label>
+        Частота боссов
+
+        <select id="devBossFrequency">
+
+          <option value="2">
+            Каждые 2 уровня
+          </option>
+
+          <option value="3">
+            Каждые 3 уровня
+          </option>
+
+          <option value="5" selected>
+            Каждые 5 уровней
+          </option>
+
+          <option value="10">
+            Каждые 10 уровней
+          </option>
+
+          <option value="random">
+            Random
+          </option>
+
+        </select>
+
+      </label>
+
+    </div>
+
+    <!-- Принудительная активация/деактивация бонусов для тестирования -->
+    <div class="dev-section">
+      <div class="dev-subtitle">Принудительные бонусы</div>
+
+      <div class="dev-row">
+        <button id="devForceBig" type="button">🟢 Big</button>
+        <button id="devForceFire" type="button">🔥 Fire</button>
+      </div>
+      <div class="dev-row">
+        <button id="devForceMulti" type="button">⚪ Multi</button>
+        <button id="devForceSlow" type="button">🔵 Slow</button>
+      </div>
+      <label class="dev-checkbox">
+        <input
+          id="devBonusesDisabled"
+          type="checkbox"
+        >
+        <span>🚫 Отключить выпадение бонусов</span>
+      </label>
+    </div>
+
+    <button
+      id="devExit"
+      type="button"
+      class="dev-exit"
+    >
+      ← Выйти из Developer
+    </button>
+
+  </div>
 
   </div>
 
