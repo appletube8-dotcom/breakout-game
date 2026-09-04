@@ -29,6 +29,12 @@ const sfx = {
   bonus:  () => { tone(600, 0.09, 'sine', 0.14); setTimeout(() => tone(900, 0.12, 'sine', 0.14), 70); },
   lose:   () => tone(320, 0.4, 'sawtooth', 0.15, 80),
   win:    () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.15, 'triangle', 0.14), i * 110)); },
+  // Отдельный звук поимки для каждого бонуса — чтобы они узнавались на слух,
+  // не сливаясь в один и тот же "дзынь".
+  catchBig:   () => { tone(300, 0.1, 'sine', 0.13); setTimeout(() => tone(420, 0.14, 'sine', 0.13), 50); },
+  catchFire:  () => { tone(180, 0.05, 'sawtooth', 0.16); setTimeout(() => tone(140, 0.18, 'sawtooth', 0.14, 90), 30); },
+  catchMulti: () => { [700, 850, 1000].forEach((f, i) => setTimeout(() => tone(f, 0.06, 'square', 0.11), i * 45)); },
+  catchSlow:  () => tone(520, 0.35, 'sine', 0.13, 190),
 };
 document.addEventListener('mousedown', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });
@@ -72,13 +78,12 @@ function togglePause() {
 const platform = {
   x: W / 2,
   y: H - 30,
-  w: 110,
-  baseW: 110,
+  w: 92,
+  baseW: 92, // абсолютная база — не меняется в течение игры
+  levelBaseW: 92, // фактическая база ДЛЯ ТЕКУЩЕГО УРОВНЯ (уже поменьше на боссах)
   h: 14,
   speed: 8,
   vx: 0,
-  fire: false, // огненный режим
-  fireTimer: 0,
 };
 
 let balls = [];
@@ -86,7 +91,7 @@ let bricks = [];
 let bonuses = [];
 let particles = [];
 let stars = [];
-let powers = { slowToken: 0 }; // активные бонусы { fire, big, multi, slowActive, slowToken }
+let powers = { slowToken: 0, bigToken: 0, fireToken: 0 }; // активные бонусы { fire, big, multi, slowActive, slowToken }
 let shake = { time: 0, power: 0 };
 
 // ---- Режим разработчика ----
@@ -97,6 +102,7 @@ const dev = {
   showHitboxes: false,
   slowMotion: false,
   bossFrequency: 5, // 'random' или число
+  bonusesDisabled: false,
 };
 
 function triggerShake(power, duration = 140) {
@@ -119,6 +125,21 @@ function makeStars(count) {
 }
 makeStars(140);
 
+// ---- Туманности фона (лёгкая глубина, недорого по FPS — всего 3 объекта) ----
+let nebulae = [];
+function makeNebulae() {
+  const palette = ['#4a5fd0', '#7a3fc0', '#2f8fb0'];
+  nebulae = palette.map((color, i) => ({
+    x: (W / 4) * (i + 1) + (Math.random() - 0.5) * 100,
+    y: (H / 3) * (i % 2 === 0 ? 0.7 : 1.3) + (Math.random() - 0.5) * 60,
+    r: 180 + Math.random() * 80,
+    color,
+    vx: (Math.random() - 0.5) * 0.06,
+    vy: (Math.random() - 0.5) * 0.04,
+  }));
+}
+makeNebulae();
+
 // ---- Уровни (матрица кирпичей) ----
 function isBossLevel(lvl) {
   const freq = (dev.active) ? dev.bossFrequency : 5;
@@ -130,25 +151,50 @@ function isBossLevel(lvl) {
   return lvl % freq === 0;
 }
 
+// Платформа на boss-уровнях уже (меньше пространства для ошибки, точнее нужно
+// целиться), чем на обычных — как ты и просил. Если в момент смены уровня
+// активен Big-бонус, не сбрасываем его резко — эффект доиграет как обычно,
+// просто "домашняя" ширина, к которой он потом вернётся, будет другой.
+function applyPlatformWidthForLevel(isBoss) {
+  platform.levelBaseW = isBoss ? Math.round(platform.baseW * 0.72) : platform.baseW;
+  if (!powers.big) platform.w = platform.levelBaseW;
+}
+
 // 0 - пусто, 1 - обычный, 2 - крепкий
 function buildLevel(lvl) {
+  applyPlatformWidthForLevel(isBossLevel(lvl));
   if (isBossLevel(lvl)) {
     buildBossLevel(lvl);
     return;
   }
   bricks = [];
-  const rows = Math.min(3 + lvl, 8);
-  const cols = 10;
-  const bw = 62, bh = 22, gap = 8;
-  const top = 80;
+  // Более мелкая сетка, чем раньше — больше ячеек, каждая уже (было 10 колонок
+  // по 62px, стало 16 колонок по 42px) — больше пространства для манёвра мяча
+  // между рядами и точнее читается форма фигуры.
+  const cols = 16;
+  const bw = 42, bh = 18, gap = 5;
+  const rows = Math.min(7 + Math.floor(lvl / 3), 12);
+  const top = 70;
   const totalW = cols * bw + (cols - 1) * gap;
   const startX = (W - totalW) / 2;
 
+  const filled = choosePattern(lvl, cols, rows);
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
+      const key = `${c},${r}`;
+      if (!filled.has(key)) continue;
+
+      // Клетки на краю фигуры (мало заполненных соседей) — сложнее попасть
+      // прицельно, поэтому чаще получают доп. прочность, как ты и просил.
+      const neighbors = [[1,0],[-1,0],[0,1],[0,-1]]
+        .filter(([dx, dy]) => filled.has(`${c+dx},${r+dy}`)).length;
+      const isEdge = neighbors <= 2;
+
       let hp = 1;
-      if (lvl >= 3 && (r === 0 || r === 1)) hp = 2; // крепкие сверху
-      if (Math.random() < 0.06 && hp === 2) hp = 3;
+      if (lvl >= 3 && isEdge && Math.random() < 0.35) hp = 2;
+      if (hp === 2 && Math.random() < 0.08) hp = 3;
+
       bricks.push({
         x: startX + c * (bw + gap),
         y: top + r * (bh + gap),
@@ -156,7 +202,6 @@ function buildLevel(lvl) {
         h: bh,
         hp,
         maxHp: hp,
-        color: hp === 3 ? '#ff4dd2' : hp === 2 ? '#ff9a3c' : null,
         alive: true,
       });
     }
@@ -169,23 +214,110 @@ function buildLevel(lvl) {
   });
 }
 
-// ---- Boss-уровень: плотное поле мелких ячеек со спиральным коридором ----
+// ---- Фигуры обычных уровней ----
+// Возвращают Set ключей "col,row" — какие клетки сетки заполнены кирпичом.
+// Чередуются по номеру уровня, чтобы каждый уровень между боссами выглядел по-разному.
+function choosePattern(lvl, cols, rows) {
+  const variant = lvl % 5; // 5 разных форм, боссы (кратно 5) сюда не попадают
+  switch (variant) {
+    case 1: return diamondPattern(cols, rows);
+    case 2: return pyramidPattern(cols, rows);
+    case 3: return hourglassPattern(cols, rows);
+    case 4: return crossPattern(cols, rows);
+    default: return checkerGapPattern(cols, rows);
+  }
+}
+
+function diamondPattern(cols, rows) {
+  const filled = new Set();
+  const cx = (cols - 1) / 2, cy = (rows - 1) / 2;
+  const rx = cols / 2, ry = rows / 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (Math.abs(c - cx) / rx + Math.abs(r - cy) / ry <= 1.0) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+function pyramidPattern(cols, rows) {
+  const filled = new Set();
+  const cx = (cols - 1) / 2;
+  for (let r = 0; r < rows; r++) {
+    const half = Math.round((r + 1) * (cols / 2) / rows);
+    for (let c = 0; c < cols; c++) {
+      if (Math.abs(c - cx) <= half) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+function hourglassPattern(cols, rows) {
+  const filled = new Set();
+  const cx = (cols - 1) / 2;
+  const midRow = (rows - 1) / 2;
+  for (let r = 0; r < rows; r++) {
+    const distFromMid = Math.abs(r - midRow) / midRow;
+    const half = distFromMid * (cols / 2);
+    for (let c = 0; c < cols; c++) {
+      if (Math.abs(c - cx) <= half) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+function crossPattern(cols, rows) {
+  const filled = new Set();
+  const cx = Math.floor(cols / 2), cy = Math.floor(rows / 2);
+  const armW = Math.max(2, Math.floor(cols * 0.2));
+  const armH = Math.max(1, Math.floor(rows * 0.22));
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (Math.abs(c - cx) <= armW || Math.abs(r - cy) <= armH) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+function checkerGapPattern(cols, rows) {
+  const filled = new Set();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if ((c + r) % 3 !== 0) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+// ---- Boss-уровень: плотное поле мелких ячеек с туннелем-лабиринтом ----
 function buildBossLevel(lvl) {
   bricks = [];
-  const cols = 22;
-  const rows = 14; // меньше рядов — освобождаем нижнюю часть экрана
+  // Более мелкая сетка специально для боссов — больше ячеек, каждая уже,
+  // чем на обычных уровнях (было 22x14, стало 26x18) — как ты и просил.
+  const cols = 26;
+  const rows = 18;
   const cw = W / cols;
-  const fieldH = 320; // жёстко фиксированная высота поля, не зависит от H
+  const fieldH = 360;
   const ch = fieldH / rows;
-  const top = 15; // почти вплотную к верхней границе канваса
-  // Зазор между нижним краем поля и платформой: top + fieldH = 45+320 = 365,
-  // платформа на y = H-30 = 570 — то есть ~200px свободного пространства для разгона/прицеливания.
+  const top = 12;
   const cx = Math.floor(cols / 2);
-  const cy = 2; // ядро ближе к верху поля — удлиняет вертикальное плечо буквы Г
+  // Позиция ядра зависит от формы: туннелям нужен длинный вертикальный ствол
+  // (ядро ближе к верху), а спирали — простор со всех сторон для закручивания
+  // (ядро в центре поля) — иначе радиус спирали слишком мал и она почти
+  // не закручивается, вырождаясь в короткую закорючку у самого верха.
+  const variant = Math.floor(lvl / 5) % 3;
+  const cy = variant === 2 ? Math.floor(rows / 2) : 3;
 
-  // Первый boss-уровень тестируем с двумя входами снизу с разных сторон поля.
+  const mirrored = ((lvl * 2654435761) % 2) === 0;
   const corridor = new Set();
-  buildLShapeCorridorMask(corridor, cols, rows, cx, cy);
+  if (variant === 0) {
+    buildSingleTunnelMask(corridor, cols, rows, cx, cy, mirrored ? cols - 3 : 2);
+  } else if (variant === 1) {
+    buildSingleTunnelMask(corridor, cols, rows, cx, cy, 2);
+    buildSingleTunnelMask(corridor, cols, rows, cx, cy, cols - 3);
+  } else {
+    buildSpiralCorridorMask(corridor, cols, rows, cx, cy);
+  }
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -195,15 +327,14 @@ function buildBossLevel(lvl) {
       const isCenter = c === cx && r === cy;
       const isPerimeter = c === 0 || c === cols - 1 || r === 0 || r === rows - 1;
       const distToCenter = Math.hypot(c - cx, r - cy);
-      // Чем ближе к центру, тем выше шанс на крепкую ячейку — небольшая защита ядра.
       let hp = 1;
       if (!isCenter && distToCenter < 3 && Math.random() < 0.3) hp = 2;
 
       bricks.push({
         x: c * cw + cw / 2,
         y: top + r * ch + ch / 2,
-        w: cw - 3,
-        h: ch - 3,
+        w: cw - 2,
+        h: ch - 2,
         hp,
         maxHp: hp,
         alive: true,
@@ -211,8 +342,6 @@ function buildBossLevel(lvl) {
         isBossCell: true,
         // Неразрушимая граница поля — единственный проход внутрь конструкции
         // тогда идёт строго через сам коридор, а не через пролом стены сбоку.
-        // Работает даже против Fire-бонуса — indestructible проверяется
-        // в hitBrick раньше, чем срабатывает "прожигание".
         indestructible: isPerimeter,
       });
     }
@@ -225,23 +354,35 @@ function buildBossLevel(lvl) {
   });
 }
 
-// Два Г-образных коридора с входами СНИЗУ поля (оттуда прилетает мяч от
-// платформы): каждый узкий вертикальный проход поднимается от нижней границы
-// поля вверх, затем поворачивает по горизонтали к центральной колонке, где
-// расположено ядро. Оба входа ведут к одному ядру с разных сторон поля —
-// даёт игроку выбор, с какой стороны заходить, сохраняя логику "один точный
-// путь среди сплошного массива". Само поле ячеек всегда доходит до самых
-// краёв канваса — входы не делают в поле "остров", а прорезают коридоры
-// прямо в сплошном массиве.
-function buildLShapeCorridorMask(corridor, cols, rows, cx, cy) {
-  const entries = [2, cols - 3]; // левый и правый вход
-  for (const entryCol of entries) {
-    for (let r = rows - 1; r >= cy; r--) {
-      corridor.add(`${entryCol},${r}`);
+// Один туннель с входом СНИЗУ поля и двумя "камерами" — расширениями до 3
+// клеток вдоль вертикального ствола. Узкое горлышко у входа требует точного
+// попадания (промах — мяч просто улетает обратно), а внутри камер туннель
+// достаточно широк, чтобы мяч реально рикошетил из стороны в сторону и
+// разбивал ячейки по бокам — в туннеле шириной 1 клетка это физически
+// невозможно, поэтому камеры обязательны для задуманной механики.
+function buildSingleTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
+  const bottom = rows - 1;
+  const chamberY1 = Math.round(bottom - (bottom - cy) * 0.35);
+  const chamberY2 = Math.round(bottom - (bottom - cy) * 0.7);
+  const chamberHalfHeight = 1; // высота камеры = 3 клетки (±1 от центра)
+  const chamberWidth = 1; // расширение ±1 клетка от ствола = 3 клетки шириной
+
+  for (let r = bottom; r >= cy; r--) {
+    const inChamber = Math.abs(r - chamberY1) <= chamberHalfHeight || Math.abs(r - chamberY2) <= chamberHalfHeight;
+    const width = inChamber ? chamberWidth : 0;
+    for (let dx = -width; dx <= width; dx++) {
+      const c = entryCol + dx;
+      if (c >= 1 && c <= cols - 2) corridor.add(`${c},${r}`);
     }
-    const stepCol = entryCol < cx ? 1 : -1;
-    for (let c = entryCol; c !== cx + stepCol; c += stepCol) {
-      corridor.add(`${c},${cy}`);
+  }
+  const stepCol = entryCol < cx ? 1 : -1;
+  for (let c = entryCol; c !== cx + stepCol; c += stepCol) {
+    corridor.add(`${c},${cy}`);
+  }
+  // камера-приёмник вокруг ядра 3x3 — тоже даёт мячу порикошетить перед финальным ударом
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      corridor.add(`${cx + dx},${cy + dy}`);
     }
   }
 }
@@ -259,12 +400,14 @@ function buildSpiralCorridorMask(corridor, cols, rows, cx, cy) {
   const steps = 500;
 
   let prevX = null, prevY = null;
+  let firstX = null, firstY = null;
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const angle = t * totalAngle;
     const r = maxR * (1 - t);
     const px = cx + Math.cos(angle) * r;
     const py = cy + Math.sin(angle) * r;
+    if (i === 0) { firstX = Math.round(px); firstY = Math.round(py); }
     if (prevX !== null) {
       spiralThickLine(prevX, prevY, px, py, (gx, gy) => {
         if (gx >= 0 && gx < cols && gy >= 0 && gy < rows) corridor.add(`${gx},${gy}`);
@@ -276,6 +419,13 @@ function buildSpiralCorridorMask(corridor, cols, rows, cx, cy) {
   // Гарантируем, что центр (ядро) и его 4 соседа всегда пусты.
   const core = [[cx, cy], [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
   core.forEach(([cxN, cyN]) => corridor.add(`${cxN},${cyN}`));
+
+  // ВХОД: без этого канала внешняя точка спирали не касается края поля, и
+  // мяч физически не может попасть внутрь конструкции — прокладываем прямой
+  // проход от первой точки кривой вниз до нижней границы поля.
+  for (let r = rows - 1; r >= firstY; r--) {
+    corridor.add(`${firstX},${r}`);
+  }
 }
 
 function spiralThickLine(x0, y0, x1, y1, cb) {
@@ -289,8 +439,6 @@ function spiralThickLine(x0, y0, x1, y1, cb) {
     const e2 = 2 * err;
     const movX = e2 >= dy, movY = e2 <= dx;
     if (movX && movY) {
-      // Диагональный шаг — добавляем промежуточную клетку по одной из осей,
-      // иначе линия была бы только 8-связной и мяч мог "срезать" сквозь стену.
       cb(x + sx, y);
       err += dy; x += sx;
       err += dx; y += sy;
@@ -309,7 +457,7 @@ function maxBallSpeed() {
   return Math.min(11 + (state.level - 1) * 0.4, 15);
 }
 
-function spawnBalls(n = 1, fromBrick = null) {
+function spawnBalls(n = 1) {
   const sp = baseBallSpeed();
   for (let i = 0; i < n; i++) {
     const ang = (Math.PI / 2) + (Math.random() - 0.5) * 0.7;
@@ -339,6 +487,7 @@ const BONUS_TYPES = [
 ];
 
 function spawnBonus(x, y, chance = 0.22) {
+  if (dev.active && dev.bonusesDisabled) return;
   if (Math.random() > chance) return;
   const b = BONUS_TYPES[Math.floor(Math.random() * BONUS_TYPES.length)];
   bonuses.push({
@@ -412,21 +561,41 @@ function releaseStuck() {
 }
 
 // ---- Активация бонусов ----
+function playBonusCatchSound(type) {
+  if (type === 'big') sfx.catchBig();
+  else if (type === 'fire') sfx.catchFire();
+  else if (type === 'multi') sfx.catchMulti();
+  else if (type === 'slow') sfx.catchSlow();
+  else sfx.bonus();
+}
+
 function applyBonus(type) {
   if (type === 'big') {
-    platform.w = Math.min(platform.baseW * 1.8, platform.w * 1.35);
+    platform.w = Math.min(platform.levelBaseW * 1.8, platform.w * 1.35);
     powers.big = true;
+    // Баг из прошлой версии: повторная поимка Big во время уже активного эффекта
+    // запускала НОВЫЙ независимый таймер на 15с, но старый таймер срабатывал
+    // раньше и резко возвращал платформу к обычной ширине — теперь повторная
+    // поимка корректно продлевает эффект (тот же паттерн, что и у Slow).
+    const myToken = ++powers.bigToken;
     setTimeout(() => {
-      platform.w = platform.baseW;
+      if (powers.bigToken !== myToken) return;
+      platform.w = platform.levelBaseW;
       powers.big = false;
     }, 15000);
   } else if (type === 'fire') {
+    // Fire был отмечен как избыточно сильный бонус — сократил длительность
+    // действия с 12с до 7с. Сам эффект (прохождение мяча сквозь кирпичи без
+    // отскока) не трогал — при желании можно ослабить и его отдельно.
     powers.fire = true;
     balls.forEach(b => b.fire = true);
+    const myToken = ++powers.fireToken;
     setTimeout(() => {
+      // Тот же баг стакинга, что был у Slow/Big — фиксирую тем же способом.
+      if (powers.fireToken !== myToken) return;
       powers.fire = false;
       balls.forEach(b => b.fire = false);
-    }, 12000);
+    }, 7000);
   } else if (type === 'multi') {
     // Решение по балансу: multi не снимается таймером (в отличие от big/fire),
     // потому что лишние мячи сами по себе теряются, падая за платформу —
@@ -695,7 +864,7 @@ function update() {
       updateScore();
       explode(bo.x, bo.y, bo.color, 14);
       showBuff(bo.label, bo.color);
-      sfx.bonus();
+      playBonusCatchSound(bo.type);
       triggerShake(2, 120);
       bo.caught = true;
     }
@@ -714,6 +883,14 @@ function update() {
   // звёзды
   for (const s of stars) {
     s.tw += s.speed;
+  }
+
+  // туманности — медленный дрейф с отражением от краёв
+  for (const n of nebulae) {
+    n.x += n.vx;
+    n.y += n.vy;
+    if (n.x - n.r < 0 || n.x + n.r > W) n.vx *= -1;
+    if (n.y - n.r < 0 || n.y + n.r > H) n.vy *= -1;
   }
 
   // тряска экрана
@@ -785,6 +962,15 @@ function draw() {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
+  // туманности — мягкие радиальные пятна под звёздами, для глубины
+  for (const n of nebulae) {
+    const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r);
+    g.addColorStop(0, n.color + '26'); // низкая непрозрачность (~15%)
+    g.addColorStop(1, n.color + '00');
+    ctx.fillStyle = g;
+    ctx.fillRect(n.x - n.r, n.y - n.r, n.r * 2, n.r * 2);
+  }
+
   // звёзды
   for (const s of stars) {
     const a = 0.4 + 0.6 * Math.abs(Math.sin(s.tw));
@@ -803,25 +989,7 @@ function draw() {
 
   // бонусы
   for (const bo of bonuses) {
-    ctx.save();
-    ctx.translate(bo.x, bo.y);
-    ctx.rotate(bo.ang);
-    ctx.beginPath();
-    ctx.moveTo(0, -bo.r);
-    ctx.lineTo(bo.r, bo.r);
-    ctx.lineTo(-bo.r, bo.r);
-    ctx.closePath();
-    ctx.fillStyle = bo.color;
-    ctx.shadowColor = bo.color;
-    ctx.shadowBlur = 16;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.restore();
-    // подпись
-    ctx.font = '10px sans-serif';
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.fillText(bo.label === 'Широкая пластина' ? 'ШИР' : bo.label === 'Огненный мяч' ? 'ОГОНЬ' : bo.label === 'Тройной мяч' ? 'x3' : 'SLOW', bo.x, bo.y + 4);
+    drawBonusIcon(bo);
   }
 
   // мячи
@@ -930,6 +1098,66 @@ function drawBrick(br) {
   ctx.restore();
 }
 
+function drawBonusIcon(bo) {
+  ctx.save();
+  ctx.translate(bo.x, bo.y);
+  ctx.rotate(bo.ang * 0.3); // медленное вращение — было слишком резким при полном bo.ang
+
+  // Общая подложка-капсула — светящийся круг в цвете бонуса, единая база
+  // для всех типов, чтобы они читались как одно семейство предметов.
+  ctx.beginPath();
+  ctx.arc(0, 0, bo.r, 0, Math.PI * 2);
+  ctx.fillStyle = bo.color;
+  ctx.shadowColor = bo.color;
+  ctx.shadowBlur = 16;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Уникальный силуэт внутри — узнаётся на глаз без чтения подписи.
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#ffffff';
+  const r = bo.r;
+
+  if (bo.type === 'big') {
+    // Двойная стрелка "расширение" ↔
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.55, 0); ctx.lineTo(r * 0.55, 0);
+    ctx.moveTo(-r * 0.55, 0); ctx.lineTo(-r * 0.3, -r * 0.28);
+    ctx.moveTo(-r * 0.55, 0); ctx.lineTo(-r * 0.3, r * 0.28);
+    ctx.moveTo(r * 0.55, 0); ctx.lineTo(r * 0.3, -r * 0.28);
+    ctx.moveTo(r * 0.55, 0); ctx.lineTo(r * 0.3, r * 0.28);
+    ctx.stroke();
+  } else if (bo.type === 'fire') {
+    // Силуэт капли пламени
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 0.65);
+    ctx.quadraticCurveTo(r * 0.5, -r * 0.1, r * 0.28, r * 0.35);
+    ctx.quadraticCurveTo(r * 0.15, r * 0.6, 0, r * 0.6);
+    ctx.quadraticCurveTo(-r * 0.15, r * 0.6, -r * 0.28, r * 0.35);
+    ctx.quadraticCurveTo(-r * 0.5, -r * 0.1, 0, -r * 0.65);
+    ctx.closePath();
+    ctx.fill();
+  } else if (bo.type === 'multi') {
+    // Три маленьких круга — три мяча
+    [[0, -r * 0.42], [-r * 0.4, r * 0.28], [r * 0.4, r * 0.28]].forEach(([dx, dy]) => {
+      ctx.beginPath();
+      ctx.arc(dx, dy, r * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else if (bo.type === 'slow') {
+    // Песочные часы
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.4, -r * 0.5); ctx.lineTo(r * 0.4, -r * 0.5);
+    ctx.lineTo(-r * 0.4, r * 0.5); ctx.lineTo(r * 0.4, r * 0.5);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 function drawBall(b) {
   ctx.save();
   let color = '#9ff0ff';
@@ -1009,7 +1237,7 @@ function startGame() {
   devPanel.classList.add('hidden');
   state = { running: true, paused: false, score: 0, lives: 3, level: 1 };
   platform.w = platform.baseW;
-  powers = { slowToken: 0 };
+  powers = { slowToken: 0, bigToken: 0, fireToken: 0 };
   const saved = localStorage.getItem('spaceBreakBest');
   bestEl.textContent = saved || 0;
   scoreEl.textContent = 0;
@@ -1107,6 +1335,11 @@ const devGodMode = document.getElementById('devGodMode');
 const devHitboxes = document.getElementById('devHitboxes');
 const devSlowMotion = document.getElementById('devSlowMotion');
 const devBossFrequency = document.getElementById('devBossFrequency');
+const devForceBig = document.getElementById('devForceBig');
+const devForceFire = document.getElementById('devForceFire');
+const devForceMulti = document.getElementById('devForceMulti');
+const devForceSlow = document.getElementById('devForceSlow');
+const devBonusesDisabled = document.getElementById('devBonusesDisabled');
 const devExit = document.getElementById('devExit');
 
 function openDevMode() {
@@ -1116,7 +1349,7 @@ function openDevMode() {
   // Стартуем сразу играбельную сессию, чтобы можно было тестировать уровни вживую.
   state = { running: true, paused: false, score: 0, lives: dev.infiniteLives ? Infinity : 3, level: 1 };
   platform.w = platform.baseW;
-  powers = { slowToken: 0 };
+  powers = { slowToken: 0, bigToken: 0, fireToken: 0 };
   scoreEl.textContent = 0;
   livesEl.textContent = dev.infiniteLives ? '∞' : state.lives;
   levelEl.textContent = 1;
@@ -1187,8 +1420,15 @@ devSlowMotion.addEventListener('change', () => {
 });
 devBossFrequency.addEventListener('change', () => {
   dev.bossFrequency = devBossFrequency.value === 'random' ? 'random' : parseInt(devBossFrequency.value, 10);
-  // Примечание: сами боссы ещё не реализованы в игровой логике — это только
-  // настройка для будущей фичи, чтобы не потерять выбор пользователя.
+});
+
+// Принудительная активация бонусов — для тестирования без ожидания их выпадения.
+devForceBig.addEventListener('click', () => applyBonus('big'));
+devForceFire.addEventListener('click', () => applyBonus('fire'));
+devForceMulti.addEventListener('click', () => applyBonus('multi'));
+devForceSlow.addEventListener('click', () => applyBonus('slow'));
+devBonusesDisabled.addEventListener('change', () => {
+  dev.bonusesDisabled = devBonusesDisabled.checked;
 });
 
 // checkbox "Бесконечные жизни" стоит checked в разметке по умолчанию — синхронизируем стартовое состояние
