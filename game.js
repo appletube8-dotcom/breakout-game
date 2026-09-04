@@ -120,8 +120,22 @@ function makeStars(count) {
 makeStars(140);
 
 // ---- Уровни (матрица кирпичей) ----
+function isBossLevel(lvl) {
+  const freq = (dev.active) ? dev.bossFrequency : 5;
+  if (freq === 'random') {
+    // Детерминированный "случайный" выбор по номеру уровня, чтобы одно и то же
+    // значение level всегда давало одинаковый результат (не дёргалось при перерисовке).
+    return ((lvl * 2654435761) % 100) < 22; // ~22% уровней — боссы
+  }
+  return lvl % freq === 0;
+}
+
 // 0 - пусто, 1 - обычный, 2 - крепкий
 function buildLevel(lvl) {
+  if (isBossLevel(lvl)) {
+    buildBossLevel(lvl);
+    return;
+  }
   bricks = [];
   const rows = Math.min(3 + lvl, 8);
   const cols = 10;
@@ -153,6 +167,107 @@ function buildLevel(lvl) {
     b.hue = Math.floor(Math.random() * pals.length);
     b.pal = pals[b.hue] || pals[0];
   });
+}
+
+// ---- Boss-уровень: плотное поле мелких ячеек со спиральным коридором ----
+function buildBossLevel(lvl) {
+  bricks = [];
+  const cols = 22;
+  const rows = 16;
+  const cw = W / cols;
+  const ch = (H - 90) / rows; // оставляем зону снизу для платформы и подлёта мяча
+  const top = 60;
+  const cx = Math.floor(cols / 2);
+  const cy = Math.floor(rows / 2);
+
+  // Строим маску коридора спирали методом "хождения по кольцам" от края к центру.
+  const corridor = new Set();
+  buildSpiralCorridorMask(corridor, cols, rows, cx, cy);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const key = `${c},${r}`;
+      if (corridor.has(key)) continue; // пустой коридор — здесь ячейки нет
+
+      const isCenter = c === cx && r === cy;
+      const distToCenter = Math.hypot(c - cx, r - cy);
+      // Чем ближе к центру, тем выше шанс на крепкую ячейку — небольшая защита ядра.
+      let hp = 1;
+      if (!isCenter && distToCenter < 3 && Math.random() < 0.3) hp = 2;
+
+      bricks.push({
+        x: c * cw + cw / 2,
+        y: top + r * ch + ch / 2,
+        w: cw - 3,
+        h: ch - 3,
+        hp,
+        maxHp: hp,
+        alive: true,
+        isBossCore: isCenter,
+        isBossCell: true,
+      });
+    }
+  }
+
+  const pals = ['#ff4dd2', '#b48cff', '#7ad7ff', '#ff9a3c'];
+  bricks.forEach(b => {
+    b.hue = Math.floor(Math.random() * pals.length);
+    b.pal = b.isBossCore ? '#ffe14d' : pals[b.hue] || pals[0];
+  });
+}
+
+// Строит связную спиральную маску "пустых" клеток от края поля к центру.
+// Спираль задаётся математически в полярных координатах (угол растёт, радиус
+// падает), а между соседними точками кривой проводится "толстая" линия
+// (модифицированный Брезенхэм с доп. клеткой на диагональных шагах), чтобы
+// коридор был гарантированно 4-связным — без этого мяч мог физически пройти
+// по диагонали через "дыру", а логика игры считала бы клетки не соединёнными.
+function buildSpiralCorridorMask(corridor, cols, rows, cx, cy) {
+  const maxR = Math.min(cx, cy, cols - cx, rows - cy) - 1;
+  const turns = 2.4;
+  const totalAngle = turns * Math.PI * 2;
+  const steps = 500;
+
+  let prevX = null, prevY = null;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const angle = t * totalAngle;
+    const r = maxR * (1 - t);
+    const px = cx + Math.cos(angle) * r;
+    const py = cy + Math.sin(angle) * r;
+    if (prevX !== null) {
+      spiralThickLine(prevX, prevY, px, py, (gx, gy) => {
+        if (gx >= 0 && gx < cols && gy >= 0 && gy < rows) corridor.add(`${gx},${gy}`);
+      });
+    }
+    prevX = px; prevY = py;
+  }
+
+  // Гарантируем, что центр (ядро) и его 4 соседа всегда пусты.
+  const core = [[cx, cy], [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
+  core.forEach(([cxN, cyN]) => corridor.add(`${cxN},${cyN}`));
+}
+
+function spiralThickLine(x0, y0, x1, y1, cb) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  let x = x0, y = y0;
+  cb(x, y);
+  while (!(x === x1 && y === y1)) {
+    const e2 = 2 * err;
+    const movX = e2 >= dy, movY = e2 <= dx;
+    if (movX && movY) {
+      // Диагональный шаг — добавляем промежуточную клетку по одной из осей,
+      // иначе линия была бы только 8-связной и мяч мог "срезать" сквозь стену.
+      cb(x + sx, y);
+      err += dy; x += sx;
+      err += dx; y += sy;
+    } else if (movX) { err += dy; x += sx; }
+    else { err += dx; y += sy; }
+    cb(x, y);
+  }
 }
 
 // ---- Мячи ----
@@ -193,9 +308,8 @@ const BONUS_TYPES = [
   { id: 'slow', label: 'Замедление', color: '#5ec8ff' },
 ];
 
-function spawnBonus(x, y) {
-  // шанс выпадения ~ 22%
-  if (Math.random() > 0.22) return;
+function spawnBonus(x, y, chance = 0.22) {
+  if (Math.random() > chance) return;
   const b = BONUS_TYPES[Math.floor(Math.random() * BONUS_TYPES.length)];
   bonuses.push({
     x, y, vy: 2.2,
@@ -388,10 +502,32 @@ function hitBrick(ball, brick) {
   if (brick.hp <= 0) {
     brick.alive = false;
     state.score += 100;
-    spawnBonus(brick.x, brick.y);
-    explode(brick.x, brick.y, color, 18);
-    // Крепкие кирпичи (maxHp 2-3) дают более заметную отдачу при разрушении
-    triggerShake(brick.maxHp >= 3 ? 6 : brick.maxHp === 2 ? 3.5 : 1.5, brick.maxHp >= 2 ? 160 : 100);
+
+    if (brick.isBossCore) {
+      // Ядро спирали разрушено правильным прохождением — большой залп бонусов.
+      state.score += 500;
+      for (let i = 0; i < 5; i++) {
+        setTimeout(() => spawnBonus(
+          brick.x + (Math.random() - 0.5) * 60,
+          brick.y + (Math.random() - 0.5) * 60,
+          1
+        ), i * 80);
+      }
+      explode(brick.x, brick.y, '#ffe14d', 40);
+      triggerShake(9, 260);
+      sfx.win();
+    } else if (brick.isBossCell) {
+      // Ячейки коридора спирали — почти гарантированный бонус, это и есть награда
+      // за правильную траекторию мяча внутри лабиринта.
+      spawnBonus(brick.x, brick.y, 0.85);
+      explode(brick.x, brick.y, color, 18);
+      triggerShake(2, 100);
+    } else {
+      spawnBonus(brick.x, brick.y);
+      explode(brick.x, brick.y, color, 18);
+      // Крепкие кирпичи (maxHp 2-3) дают более заметную отдачу при разрушении
+      triggerShake(brick.maxHp >= 3 ? 6 : brick.maxHp === 2 ? 3.5 : 1.5, brick.maxHp >= 2 ? 160 : 100);
+    }
   }
   updateScore();
 }
@@ -700,18 +836,20 @@ let liveBrickCountCache = 0;
 
 function drawBrick(br) {
   ctx.save();
-  const colors = {
-    1: br.pal,
-    2: '#ff9a3c',
-    3: '#ff4dd2',
-  };
-  const col = colors[br.maxHp] || br.pal;
+  let col;
+  if (br.isBossCell) {
+    col = br.isBossCore ? '#ffe14d' : br.pal;
+  } else {
+    const colors = { 1: br.pal, 2: '#ff9a3c', 3: '#ff4dd2' };
+    col = colors[br.maxHp] || br.pal;
+  }
   // При большом количестве кирпичей на экране shadowBlur — одна из самых дорогих
-  // операций canvas, особенно на мобильных. Отключаем свечение сверх ~40 кирпичей,
-  // сохраняя его для крепких (они и так малочисленны и заметнее).
-  const glowAllowed = liveBrickCountCache <= 40 || br.maxHp >= 2;
+  // операций canvas, особенно на мобильных. На boss-уровнях ячеек в разы больше,
+  // чем на обычных, поэтому порог отдельный — иначе спираль потеряет всё свечение.
+  const glowThreshold = br.isBossCell ? 260 : 40;
+  const glowAllowed = liveBrickCountCache <= glowThreshold || br.maxHp >= 2 || br.isBossCore;
   ctx.shadowColor = col;
-  ctx.shadowBlur = glowAllowed ? 18 : 0;
+  ctx.shadowBlur = glowAllowed ? (br.isBossCore ? 26 : 14) : 0;
   ctx.fillStyle = col;
   ctx.fillRect(br.x - br.w / 2, br.y - br.h / 2, br.w, br.h);
   ctx.shadowBlur = 0;
