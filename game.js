@@ -173,16 +173,22 @@ function buildLevel(lvl) {
 function buildBossLevel(lvl) {
   bricks = [];
   const cols = 22;
-  const rows = 16;
+  const rows = 14; // меньше рядов — освобождаем нижнюю часть экрана
   const cw = W / cols;
-  const ch = (H - 90) / rows; // оставляем зону снизу для платформы и подлёта мяча
-  const top = 60;
+  const fieldH = 320; // жёстко фиксированная высота поля, не зависит от H
+  const ch = fieldH / rows;
+  const top = 45; // поле прижато к верху
+  // Зазор между нижним краем поля и платформой: top + fieldH = 45+320 = 365,
+  // платформа на y = H-30 = 570 — то есть ~200px свободного пространства для разгона/прицеливания.
   const cx = Math.floor(cols / 2);
   const cy = Math.floor(rows / 2);
 
-  // Строим маску коридора спирали методом "хождения по кольцам" от края к центру.
+  // Пока тестируем простой Г-образный вход вместо спирали (проще прочитать
+  // траекторию при первых прогонах). mirrored чередуется по номеру уровня —
+  // следующий boss-уровень будет с входом с другой стороны.
+  const mirrored = Math.floor(lvl / 5) % 2 === 1;
   const corridor = new Set();
-  buildSpiralCorridorMask(corridor, cols, rows, cx, cy);
+  buildLShapeCorridorMask(corridor, cols, rows, cx, cy, mirrored);
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -214,6 +220,21 @@ function buildBossLevel(lvl) {
     b.hue = Math.floor(Math.random() * pals.length);
     b.pal = b.isBossCore ? '#ffe14d' : pals[b.hue] || pals[0];
   });
+}
+
+// Простой Г-образный коридор: заход с одной стороны поля по горизонтали до
+// центральной колонки, затем поворот на 90° и движение вверх к ядру.
+// Это тестовая форма — проще прочитать взглядом, чем спираль, и удобнее для
+// первых прогонов; mirrored разворачивает сторону входа для следующего босса.
+function buildLShapeCorridorMask(corridor, cols, rows, cx, cy, mirrored) {
+  const startCol = mirrored ? cols - 1 : 0;
+  const stepCol = mirrored ? -1 : 1;
+  for (let c = startCol; mirrored ? c >= cx : c <= cx; c += stepCol) {
+    corridor.add(`${c},${cy}`);
+  }
+  for (let r = 0; r <= cy; r++) {
+    corridor.add(`${cx},${r}`);
+  }
 }
 
 // Строит связную спиральную маску "пустых" клеток от края поля к центру.
