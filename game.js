@@ -292,43 +292,53 @@ function checkerGapPattern(cols, rows) {
 // ---- Boss-уровень: плотное поле мелких ячеек с туннелем-лабиринтом ----
 function buildBossLevel(lvl) {
   bricks = [];
-  // Более мелкая сетка специально для боссов — больше ячеек, каждая уже,
-  // чем на обычных уровнях (было 22x14, стало 26x18) — как ты и просил.
-  const cols = 26;
-  const rows = 18;
+  // Ещё мельче сетка, чем в прошлый раз (было 26x18, стало 32x15), и меньше
+  // высота поля (280 вместо 360) — это одновременно даёт более мелкие ячейки
+  // И больший зазор до платформы, как ты просил оба раза сразу.
+  const cols = 32;
+  const rows = 15;
   const cw = W / cols;
-  const fieldH = 360;
+  const fieldH = 280;
   const ch = fieldH / rows;
   const top = 12;
   const cx = Math.floor(cols / 2);
-  // Позиция ядра зависит от формы: туннелям нужен длинный вертикальный ствол
-  // (ядро ближе к верху), а спирали — простор со всех сторон для закручивания
-  // (ядро в центре поля) — иначе радиус спирали слишком мал и она почти
-  // не закручивается, вырождаясь в короткую закорючку у самого верха.
-  const variant = Math.floor(lvl / 5) % 3;
-  const cy = variant === 2 ? Math.floor(rows / 2) : 3;
+  // Позиция ядра зависит от формы: туннелям и диагонали нужен долгий путь
+  // (ядро ближе к верху), спирали — простор со всех сторон (ядро в центре).
+  const variant = Math.floor(lvl / 5) % 4;
+  const cy = variant === 1 ? Math.floor(rows / 2) : 3;
 
-  const mirrored = ((lvl * 2654435761) % 2) === 0;
+  // Число входов — от 1 до 3, меняется по номеру уровня, как ты просил.
+  const entryCount = 1 + (Math.abs(Math.floor((lvl * 2654435761) / 97)) % 3);
+  const entryCols = pickEntryColumns(cols, entryCount);
+
   const corridor = new Set();
   if (variant === 0) {
-    buildSingleTunnelMask(corridor, cols, rows, cx, cy, mirrored ? cols - 3 : 2);
+    // Один или несколько прямых туннелей с камерами, сходящихся к ядру.
+    entryCols.forEach(ec => buildSingleTunnelMask(corridor, cols, rows, cx, cy, ec));
   } else if (variant === 1) {
-    buildSingleTunnelMask(corridor, cols, rows, cx, cy, 2);
-    buildSingleTunnelMask(corridor, cols, rows, cx, cy, cols - 3);
-  } else {
     buildSpiralCorridorMask(corridor, cols, rows, cx, cy);
+  } else if (variant === 2) {
+    // Туннель под углом — по диагонали от входа к ядру.
+    buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCols[0]);
+  } else {
+    // Пространство за стеной заполнено целиком — никакого готового пути нет,
+    // только точки входа в самой стене. Мяч прогрызает себе дорогу сам, по
+    // мере разрушения ячеек, и чем дальше он забирается в глубину плотной
+    // массы, тем меньше уверенности, что он благополучно вернётся обратно.
+    entryCols.forEach(ec => corridor.add(`${ec},${rows - 1}`));
   }
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const key = `${c},${r}`;
+      const isPerimeter = c === 0 || c === cols - 1 || r === 0 || r === rows - 1;
+      if (isPerimeter) continue; // периметр строится отдельно слитыми сегментами (см. ниже)
       if (corridor.has(key)) continue; // пустой коридор — здесь ячейки нет
 
       const isCenter = c === cx && r === cy;
-      const isPerimeter = c === 0 || c === cols - 1 || r === 0 || r === rows - 1;
       const distToCenter = Math.hypot(c - cx, r - cy);
       let hp = 1;
-      if (!isCenter && distToCenter < 3 && Math.random() < 0.3) hp = 2;
+      if (variant !== 3 && !isCenter && distToCenter < 3 && Math.random() < 0.3) hp = 2;
 
       bricks.push({
         x: c * cw + cw / 2,
@@ -340,18 +350,108 @@ function buildBossLevel(lvl) {
         alive: true,
         isBossCore: isCenter,
         isBossCell: true,
-        // Неразрушимая граница поля — единственный проход внутрь конструкции
-        // тогда идёт строго через сам коридор, а не через пролом стены сбоку.
-        indestructible: isPerimeter,
       });
     }
   }
 
+  // Неразрушимая стена по периметру — слитыми сегментами, а не отдельными
+  // ячейками. Раньше каждая ячейка периметра была отдельным объектом
+  // коллизии, и мяч, задевая стык двух соседних ячеек, иногда отражался как
+  // от угла (диагонально) вместо ровной прямой — потому что физика видела
+  // "угол этой конкретной ячейки", а не "ровный участок общей стены". Слитые
+  // сегменты полностью убирают эти ложные внутренние стыки.
+  buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top);
+
   const pals = ['#ff4dd2', '#b48cff', '#7ad7ff', '#ff9a3c'];
   bricks.forEach(b => {
+    if (b.indestructible) return;
     b.hue = Math.floor(Math.random() * pals.length);
     b.pal = b.isBossCore ? '#ffe14d' : pals[b.hue] || pals[0];
   });
+}
+
+// Выбирает 1-3 точки входа, равномерно распределённые по нижнему краю поля,
+// не задевая самые углы (0 и cols-1 — это сама стена).
+function pickEntryColumns(cols, count) {
+  const usableStart = 2, usableEnd = cols - 3;
+  if (count === 1) return [Math.floor(cols / 2)];
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const t = i / (count - 1);
+    out.push(Math.round(usableStart + t * (usableEnd - usableStart)));
+  }
+  return out;
+}
+
+// Диагональный туннель — прямая линия от входа снизу к ядру под углом
+// (не строго вертикально-горизонтально, как обычный Г-образный туннель),
+// с двумя камерами-расширениями по пути для рикошета.
+function buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
+  const x0 = entryCol, y0 = rows - 1;
+  // Ограничение только по горизонтали (не задеть левую/правую стену) — по
+  // вертикали линия сама естественным образом не достаёт до верхней стены,
+  // так как заканчивается на cy=3, а раньше жёсткий зажим по gy отрезал
+  // саму точку входа и создавал разрыв с остальной линией.
+  spiralThickLine(x0, y0, cx, cy, (gx, gy) => {
+    if (gx >= 1 && gx <= cols - 2) corridor.add(`${gx},${gy}`);
+  });
+  [0.35, 0.7].forEach(t => {
+    const bx = Math.round(x0 + (cx - x0) * t);
+    const by = Math.round(y0 + (cy - y0) * t);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const gx = bx + dx, gy = by + dy;
+        if (gx >= 1 && gx <= cols - 2 && gy >= 1 && gy <= rows - 2) corridor.add(`${gx},${gy}`);
+      }
+    }
+  });
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      corridor.add(`${cx + dx},${cy + dy}`);
+    }
+  }
+}
+
+// Строит неразрушимую границу поля слитыми прямоугольными сегментами вместо
+// отдельных ячеек на каждую клетку сетки — устраняет ложные "угловые" отскоки
+// на стыках соседних ячеек стены (см. комментарий в buildBossLevel выше).
+// Верх/низ — на всю ширину (включая углы); лево/право — только между ними,
+// чтобы не задваивать сами углы.
+function buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top) {
+  function pushSegment(x0, y0, x1, y1) {
+    bricks.push({
+      x: (x0 + x1) / 2, y: (y0 + y1) / 2,
+      w: (x1 - x0) - 2, h: (y1 - y0) - 2,
+      hp: 1, maxHp: 1, alive: true,
+      isBossCell: true, indestructible: true,
+    });
+  }
+  function scanRow(r) {
+    let start = null;
+    for (let c = 0; c <= cols; c++) {
+      const isWall = c < cols && !corridor.has(`${c},${r}`);
+      if (isWall && start === null) start = c;
+      if ((!isWall || c === cols) && start !== null) {
+        pushSegment(start * cw, top + r * ch, c * cw, top + (r + 1) * ch);
+        start = null;
+      }
+    }
+  }
+  function scanCol(c, rFrom, rTo) {
+    let start = null;
+    for (let r = rFrom; r <= rTo + 1; r++) {
+      const isWall = r <= rTo && !corridor.has(`${c},${r}`);
+      if (isWall && start === null) start = r;
+      if ((!isWall || r === rTo + 1) && start !== null) {
+        pushSegment(c * cw, top + start * ch, (c + 1) * cw, top + r * ch);
+        start = null;
+      }
+    }
+  }
+  scanRow(0);
+  scanRow(rows - 1);
+  scanCol(0, 1, rows - 2);
+  scanCol(cols - 1, 1, rows - 2);
 }
 
 // Один туннель с входом СНИЗУ поля и двумя "камерами" — расширениями до 3
@@ -450,11 +550,11 @@ function spiralThickLine(x0, y0, x1, y1, cb) {
 
 // ---- Мячи ----
 function baseBallSpeed() {
-  // от 5.5 на 1 уровне до 8.5 на 10+ уровне
-  return Math.min(5.5 + (state.level - 1) * 0.35, 8.5);
+  // Откачено по просьбе: скорость больше не растёт с уровнем, всегда как на 1-м.
+  return 5.5;
 }
 function maxBallSpeed() {
-  return Math.min(11 + (state.level - 1) * 0.4, 15);
+  return 11;
 }
 
 function spawnBalls(n = 1) {
@@ -464,7 +564,7 @@ function spawnBalls(n = 1) {
     balls.push({
       x: platform.x,
       y: platform.y - 20,
-      r: 9,
+      r: 7,
       vx: Math.cos(ang) * sp,
       vy: -Math.abs(Math.sin(ang) * sp),
       stuck: true,
@@ -525,6 +625,7 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
   }
   if (e.code === 'Space' && !state.running && !state.paused) startGame();
+  if (e.code === 'Escape' && dev.active) { closeDevMode(); return; }
   if ((e.code === 'KeyP' || e.code === 'Escape') && state.running) togglePause();
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
@@ -731,7 +832,7 @@ function hitBrick(ball, brick) {
       explode(brick.x, brick.y, color, 18);
       triggerShake(2, 100);
     } else {
-      spawnBonus(brick.x, brick.y);
+      spawnBonus(brick.x, brick.y, 0.1);
       explode(brick.x, brick.y, color, 18);
       // Крепкие кирпичи (maxHp 2-3) дают более заметную отдачу при разрушении
       triggerShake(brick.maxHp >= 3 ? 6 : brick.maxHp === 2 ? 3.5 : 1.5, brick.maxHp >= 2 ? 160 : 100);
@@ -1381,7 +1482,9 @@ function devGoToLevel(lvl) {
 }
 
 developerBtn.addEventListener('click', openDevMode);
+const devCloseX = document.getElementById('devCloseX');
 devExit.addEventListener('click', closeDevMode);
+devCloseX.addEventListener('click', closeDevMode);
 
 devLoadLevel.addEventListener('click', () => {
   devGoToLevel(parseInt(devLevelInput.value, 10));
