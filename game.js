@@ -181,7 +181,7 @@ function buildBossLevel(lvl) {
   // Зазор между нижним краем поля и платформой: top + fieldH = 45+320 = 365,
   // платформа на y = H-30 = 570 — то есть ~200px свободного пространства для разгона/прицеливания.
   const cx = Math.floor(cols / 2);
-  const cy = Math.floor(rows / 2);
+  const cy = 2; // ядро ближе к верху поля — удлиняет вертикальное плечо буквы Г
 
   // Пока тестируем простой Г-образный вход вместо спирали (проще прочитать
   // траекторию при первых прогонах). mirrored чередуется по номеру уровня —
@@ -196,6 +196,7 @@ function buildBossLevel(lvl) {
       if (corridor.has(key)) continue; // пустой коридор — здесь ячейки нет
 
       const isCenter = c === cx && r === cy;
+      const isPerimeter = c === 0 || c === cols - 1 || r === 0 || r === rows - 1;
       const distToCenter = Math.hypot(c - cx, r - cy);
       // Чем ближе к центру, тем выше шанс на крепкую ячейку — небольшая защита ядра.
       let hp = 1;
@@ -211,6 +212,11 @@ function buildBossLevel(lvl) {
         alive: true,
         isBossCore: isCenter,
         isBossCell: true,
+        // Неразрушимая граница поля — единственный проход внутрь конструкции
+        // тогда идёт строго через сам коридор, а не через пролом стены сбоку.
+        // Работает даже против Fire-бонуса — indestructible проверяется
+        // в hitBrick раньше, чем срабатывает "прожигание".
+        indestructible: isPerimeter,
       });
     }
   }
@@ -515,6 +521,15 @@ function keepBallMovingVertically(ball) {
 }
 
 function hitBrick(ball, brick) {
+  if (brick.indestructible) {
+    // Неразрушимая граница поля: мяч просто высекает искру, hp не убывает
+    // и очки не начисляются — эта ячейка не может быть уничтожена никаким
+    // способом, включая Fire-бонус (тот тоже проходит через этот блок первым).
+    explode(ball.x, ball.y, '#888899', 4);
+    sfx.wall();
+    return;
+  }
+
   brick.hp--;
   const color = brick.pal;
   explode(ball.x, ball.y, color, 10);
@@ -528,7 +543,7 @@ function hitBrick(ball, brick) {
     if (brick.isBossCore) {
       // Ядро спирали разрушено правильным прохождением — большой залп бонусов.
       state.score += 500;
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 2; i++) {
         setTimeout(() => spawnBonus(
           brick.x + (Math.random() - 0.5) * 60,
           brick.y + (Math.random() - 0.5) * 60,
@@ -541,7 +556,7 @@ function hitBrick(ball, brick) {
     } else if (brick.isBossCell) {
       // Ячейки коридора спирали — почти гарантированный бонус, это и есть награда
       // за правильную траекторию мяча внутри лабиринта.
-      spawnBonus(brick.x, brick.y, 0.85);
+      spawnBonus(brick.x, brick.y, 0.3);
       explode(brick.x, brick.y, color, 18);
       triggerShake(2, 100);
     } else {
@@ -607,7 +622,9 @@ function update() {
 
         hitThisFrame.add(br);
         hitBrick(b, br);
-        if (!b.fire) {
+        // Неразрушимая граница отражает мяч всегда, даже при Fire — иначе
+        // огненный мяч прошёл бы сквозь стену поля и улетел за его пределы.
+        if (!b.fire || br.indestructible) {
           // Сначала выводим мяч наружу, затем отражаем его по нормали столкновения.
           b.x += collision.nx * (collision.push + 0.01);
           b.y += collision.ny * (collision.push + 0.01);
@@ -859,7 +876,9 @@ let liveBrickCountCache = 0;
 function drawBrick(br) {
   ctx.save();
   let col;
-  if (br.isBossCell) {
+  if (br.indestructible) {
+    col = '#2a2f3d'; // тёмный металлик — визуально явно "непробиваемо"
+  } else if (br.isBossCell) {
     col = br.isBossCore ? '#ffe14d' : br.pal;
   } else {
     const colors = { 1: br.pal, 2: '#ff9a3c', 3: '#ff4dd2' };
@@ -869,7 +888,7 @@ function drawBrick(br) {
   // операций canvas, особенно на мобильных. На boss-уровнях ячеек в разы больше,
   // чем на обычных, поэтому порог отдельный — иначе спираль потеряет всё свечение.
   const glowThreshold = br.isBossCell ? 260 : 40;
-  const glowAllowed = liveBrickCountCache <= glowThreshold || br.maxHp >= 2 || br.isBossCore;
+  const glowAllowed = !br.indestructible && (liveBrickCountCache <= glowThreshold || br.maxHp >= 2 || br.isBossCore);
   ctx.shadowColor = col;
   ctx.shadowBlur = glowAllowed ? (br.isBossCore ? 26 : 14) : 0;
   ctx.fillStyle = col;
