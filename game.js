@@ -86,7 +86,7 @@ let bricks = [];
 let bonuses = [];
 let particles = [];
 let stars = [];
-let powers = {}; // активные бонусы { fire, big, multi }
+let powers = { slowToken: 0 }; // активные бонусы { fire, big, multi, slowActive, slowToken }
 let shake = { time: 0, power: 0 };
 
 // ---- Режим разработчика ----
@@ -183,12 +183,9 @@ function buildBossLevel(lvl) {
   const cx = Math.floor(cols / 2);
   const cy = 2; // ядро ближе к верху поля — удлиняет вертикальное плечо буквы Г
 
-  // Пока тестируем простой Г-образный вход вместо спирали (проще прочитать
-  // траекторию при первых прогонах). mirrored чередуется по номеру уровня —
-  // следующий boss-уровень будет с входом с другой стороны.
-  const mirrored = Math.floor(lvl / 5) % 2 === 1;
+  // Первый boss-уровень тестируем с двумя входами снизу с разных сторон поля.
   const corridor = new Set();
-  buildLShapeCorridorMask(corridor, cols, rows, cx, cy, mirrored);
+  buildLShapeCorridorMask(corridor, cols, rows, cx, cy);
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -228,19 +225,24 @@ function buildBossLevel(lvl) {
   });
 }
 
-// Г-образный коридор с входом СНИЗУ поля (оттуда прилетает мяч от платформы):
-// узкий вертикальный проход поднимается от нижней границы поля вверх, затем
-// поворачивает по горизонтали к центральной колонке, где расположено ядро.
-// Само поле ячеек при этом всегда доходит до самых краёв канваса — вход не
-// делает в поле "остров", а прорезает коридор прямо в сплошном массиве.
-function buildLShapeCorridorMask(corridor, cols, rows, cx, cy, mirrored) {
-  const entryCol = mirrored ? cols - 3 : 2; // вход смещён к одному из боков поля
-  for (let r = rows - 1; r >= cy; r--) {
-    corridor.add(`${entryCol},${r}`);
-  }
-  const stepCol = entryCol < cx ? 1 : -1;
-  for (let c = entryCol; c !== cx + stepCol; c += stepCol) {
-    corridor.add(`${c},${cy}`);
+// Два Г-образных коридора с входами СНИЗУ поля (оттуда прилетает мяч от
+// платформы): каждый узкий вертикальный проход поднимается от нижней границы
+// поля вверх, затем поворачивает по горизонтали к центральной колонке, где
+// расположено ядро. Оба входа ведут к одному ядру с разных сторон поля —
+// даёт игроку выбор, с какой стороны заходить, сохраняя логику "один точный
+// путь среди сплошного массива". Само поле ячеек всегда доходит до самых
+// краёв канваса — входы не делают в поле "остров", а прорезают коридоры
+// прямо в сплошном массиве.
+function buildLShapeCorridorMask(corridor, cols, rows, cx, cy) {
+  const entries = [2, cols - 3]; // левый и правый вход
+  for (const entryCol of entries) {
+    for (let r = rows - 1; r >= cy; r--) {
+      corridor.add(`${entryCol},${r}`);
+    }
+    const stepCol = entryCol < cx ? 1 : -1;
+    for (let c = entryCol; c !== cx + stepCol; c += stepCol) {
+      corridor.add(`${c},${cy}`);
+    }
   }
 }
 
@@ -452,22 +454,28 @@ function applyBonus(type) {
       if (balls.length > 8) balls.length = 8;
     }
   } else if (type === 'slow') {
-    powers.slowStacks = (powers.slowStacks || 0) + 1;
-    balls.forEach(b => { b.vx *= 0.75; b.vy *= 0.75; });
-    // Баг из прошлой версии: slow не имел таймера и мог необратимо застопорить мяч
-    // при повторной ловле. Теперь эффект снимается через 8с, восстанавливая скорость.
+    powers.slowActive = (powers.slowActive || 0) + 1;
+    const isFirstActivation = powers.slowActive === 1;
+    if (isFirstActivation) {
+      // Замедление применяется только при первом срабатывании — повторная
+      // поимка Slow, пока эффект уже активен, не усиливает замедление,
+      // а лишь продлевает время его действия (см. ниже).
+      balls.forEach(b => { b.vx *= 0.75; b.vy *= 0.75; });
+    }
+    const myToken = ++powers.slowToken;
     setTimeout(() => {
-      powers.slowStacks = Math.max(0, (powers.slowStacks || 1) - 1);
-      if (powers.slowStacks === 0) {
-        balls.forEach(b => {
-          const cur = Math.hypot(b.vx, b.vy);
-          if (cur === 0) return;
-          const target = Math.min(maxBallSpeed(), Math.max(baseBallSpeed(), cur / 0.75));
-          const scale = target / cur;
-          b.vx *= scale;
-          b.vy *= scale;
-        });
-      }
+      // Снимаем эффект только если это последний выданный таймер (токен
+      // совпадает) — предотвращает преждевременное снятие при повторной ловле.
+      if (powers.slowToken !== myToken) return;
+      powers.slowActive = 0;
+      balls.forEach(b => {
+        const cur = Math.hypot(b.vx, b.vy);
+        if (cur === 0) return;
+        const target = Math.min(maxBallSpeed(), Math.max(baseBallSpeed(), cur / 0.75));
+        const scale = target / cur;
+        b.vx *= scale;
+        b.vy *= scale;
+      });
     }, 8000);
   }
 }
@@ -541,22 +549,16 @@ function hitBrick(ball, brick) {
     state.score += 100;
 
     if (brick.isBossCore) {
-      // Ядро спирали разрушено правильным прохождением — большой залп бонусов.
+      // Ядро спирали разрушено правильным прохождением — награда за успешное прохождение.
       state.score += 500;
-      for (let i = 0; i < 2; i++) {
-        setTimeout(() => spawnBonus(
-          brick.x + (Math.random() - 0.5) * 60,
-          brick.y + (Math.random() - 0.5) * 60,
-          1
-        ), i * 80);
-      }
+      spawnBonus(brick.x, brick.y, 1);
       explode(brick.x, brick.y, '#ffe14d', 40);
       triggerShake(9, 260);
       sfx.win();
     } else if (brick.isBossCell) {
       // Ячейки коридора спирали — почти гарантированный бонус, это и есть награда
       // за правильную траекторию мяча внутри лабиринта.
-      spawnBonus(brick.x, brick.y, 0.3);
+      spawnBonus(brick.x, brick.y, 0.03);
       explode(brick.x, brick.y, color, 18);
       triggerShake(2, 100);
     } else {
@@ -1007,7 +1009,7 @@ function startGame() {
   devPanel.classList.add('hidden');
   state = { running: true, paused: false, score: 0, lives: 3, level: 1 };
   platform.w = platform.baseW;
-  powers = {};
+  powers = { slowToken: 0 };
   const saved = localStorage.getItem('spaceBreakBest');
   bestEl.textContent = saved || 0;
   scoreEl.textContent = 0;
@@ -1114,7 +1116,7 @@ function openDevMode() {
   // Стартуем сразу играбельную сессию, чтобы можно было тестировать уровни вживую.
   state = { running: true, paused: false, score: 0, lives: dev.infiniteLives ? Infinity : 3, level: 1 };
   platform.w = platform.baseW;
-  powers = {};
+  powers = { slowToken: 0 };
   scoreEl.textContent = 0;
   livesEl.textContent = dev.infiniteLives ? '∞' : state.lives;
   levelEl.textContent = 1;
