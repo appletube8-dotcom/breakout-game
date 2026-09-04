@@ -89,6 +89,16 @@ let stars = [];
 let powers = {}; // активные бонусы { fire, big, multi }
 let shake = { time: 0, power: 0 };
 
+// ---- Режим разработчика ----
+const dev = {
+  active: false,
+  infiniteLives: true,
+  godMode: false,
+  showHitboxes: false,
+  slowMotion: false,
+  bossFrequency: 5, // 'random' или число
+};
+
 function triggerShake(power, duration = 140) {
   shake.power = Math.max(shake.power, power);
   shake.time = Math.max(shake.time, duration);
@@ -455,6 +465,17 @@ function update() {
     }
   }
 
+  // God Mode: мяч не улетает вниз, а отражается от невидимого пола —
+  // так можно тестировать уровень без риска потерять мяч вообще.
+  if (dev.active && dev.godMode) {
+    for (const b of balls) {
+      if (b.y + b.r > H) {
+        b.y = H - b.r;
+        b.vy = -Math.abs(b.vy);
+      }
+    }
+  }
+
   // удаляем мячи улетевшие вниз
   balls = balls.filter(b => {
     if (b.y - b.r > H + 20) {
@@ -466,9 +487,11 @@ function update() {
 
   // если все мячи потеряны
   if (balls.length === 0 && state.running) {
-    state.lives--;
-    livesEl.textContent = state.lives;
-    if (state.lives <= 0) {
+    if (!(dev.active && dev.infiniteLives)) {
+      state.lives--;
+    }
+    livesEl.textContent = dev.active && dev.infiniteLives ? '∞' : state.lives;
+    if (!(dev.active && dev.infiniteLives) && state.lives <= 0) {
       gameOver();
     } else {
       resetBall();
@@ -534,7 +557,8 @@ function update() {
 
 // ---- Отображение активных бонусов ----
 function showBuff(label, color) {
-  const wrap = document.getElementById('buffs') || createBuffsWrap();
+  const wrap = document.getElementById('buffsWrap');
+  if (!wrap) return;
   const el = document.createElement('div');
   el.className = 'buff';
   el.style.borderColor = color;
@@ -565,14 +589,6 @@ function showBuff(label, color) {
     );
     anim.onfinish = () => el.remove();
   }, 2700);
-}
-
-let buffsWrap = null;
-function createBuffsWrap() {
-  buffsWrap = document.createElement('div');
-  buffsWrap.id = 'buffs';
-  document.getElementById('game-wrap').appendChild(buffsWrap);
-  return buffsWrap;
 }
 
 // ---- Рендер ----
@@ -647,6 +663,35 @@ function draw() {
     ctx.fillStyle = p.color;
     ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  // хитбоксы (только dev-режим)
+  if (dev.active && dev.showHitboxes) {
+    drawHitboxes();
+  }
+
+  ctx.restore();
+}
+
+function drawHitboxes() {
+  ctx.save();
+  ctx.strokeStyle = '#00ff88';
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.8;
+
+  for (const br of bricks) {
+    if (!br.alive) continue;
+    ctx.strokeRect(br.x - br.w / 2, br.y - br.h / 2, br.w, br.h);
+  }
+
+  ctx.strokeStyle = '#ff2ecb';
+  ctx.strokeRect(platform.x - platform.w / 2, platform.y - platform.h / 2, platform.w, platform.h);
+
+  ctx.strokeStyle = '#ffe14d';
+  for (const b of balls) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -779,6 +824,8 @@ function updateScore() {
 
 // ---- Старт / конец ----
 function startGame() {
+  dev.active = false;
+  devPanel.classList.add('hidden');
   state = { running: true, paused: false, score: 0, lives: 3, level: 1 };
   platform.w = platform.baseW;
   powers = {};
@@ -821,8 +868,18 @@ muteBtn.addEventListener('click', e => {
 });
 
 // ---- Главный цикл ----
+let slowMoSkip = false;
 function loop() {
-  if (state.running && !state.paused) update();
+  if (state.running && !state.paused) {
+    if (dev.active && dev.slowMotion) {
+      // Замедление вдвое через пропуск каждого второго кадра обновления —
+      // не меняет саму физику/скорости, только частоту тиков.
+      slowMoSkip = !slowMoSkip;
+      if (!slowMoSkip) update();
+    } else {
+      update();
+    }
+  }
   draw();
   requestAnimationFrame(loop);
 }
@@ -854,3 +911,104 @@ function fitCanvas() {
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 200));
 fitCanvas();
+
+// ---- Developer Mode ----
+const developerBtn = document.getElementById('developerBtn');
+const devPanel = document.getElementById('devPanel');
+const devLevelInput = document.getElementById('devLevelInput');
+const devLoadLevel = document.getElementById('devLoadLevel');
+const devPrevLevel = document.getElementById('devPrevLevel');
+const devNextLevel = document.getElementById('devNextLevel');
+const devRestart = document.getElementById('devRestart');
+const devSkip = document.getElementById('devSkip');
+const devInfiniteLives = document.getElementById('devInfiniteLives');
+const devGodMode = document.getElementById('devGodMode');
+const devHitboxes = document.getElementById('devHitboxes');
+const devSlowMotion = document.getElementById('devSlowMotion');
+const devBossFrequency = document.getElementById('devBossFrequency');
+const devExit = document.getElementById('devExit');
+
+function openDevMode() {
+  dev.active = true;
+  overlay.classList.add('hidden');
+  devPanel.classList.remove('hidden');
+  // Стартуем сразу играбельную сессию, чтобы можно было тестировать уровни вживую.
+  state = { running: true, paused: false, score: 0, lives: dev.infiniteLives ? Infinity : 3, level: 1 };
+  platform.w = platform.baseW;
+  powers = {};
+  scoreEl.textContent = 0;
+  livesEl.textContent = dev.infiniteLives ? '∞' : state.lives;
+  levelEl.textContent = 1;
+  bonuses = [];
+  particles = [];
+  buildLevel(1);
+  resetBall();
+  devLevelInput.value = 1;
+}
+
+function closeDevMode() {
+  dev.active = false;
+  devPanel.classList.add('hidden');
+  state.running = false;
+  overlay.querySelector('h1').textContent = 'NEON BREAKOUT';
+  overlay.querySelector('p').textContent = 'Разбей все блоки и доберись до следующего уровня';
+  startBtn.textContent = '🎮 Играть';
+  overlay.classList.remove('hidden');
+}
+
+function devGoToLevel(lvl) {
+  const target = Math.max(1, Math.min(9999, Math.floor(lvl) || 1));
+  state.level = target;
+  levelEl.textContent = target;
+  buildLevel(target);
+  resetBall();
+  balls.forEach(b => b.stuck = false);
+  devLevelInput.value = target;
+}
+
+developerBtn.addEventListener('click', openDevMode);
+devExit.addEventListener('click', closeDevMode);
+
+devLoadLevel.addEventListener('click', () => {
+  devGoToLevel(parseInt(devLevelInput.value, 10));
+});
+devPrevLevel.addEventListener('click', () => {
+  devGoToLevel(state.level - 1);
+});
+devNextLevel.addEventListener('click', () => {
+  devGoToLevel(state.level + 1);
+});
+devSkip.addEventListener('click', () => {
+  devGoToLevel(state.level + 1);
+});
+devRestart.addEventListener('click', () => {
+  devGoToLevel(state.level);
+});
+
+devInfiniteLives.addEventListener('change', () => {
+  dev.infiniteLives = devInfiniteLives.checked;
+  if (dev.active && dev.infiniteLives) {
+    state.lives = Infinity;
+    livesEl.textContent = '∞';
+  } else if (dev.active) {
+    state.lives = 3;
+    livesEl.textContent = state.lives;
+  }
+});
+devGodMode.addEventListener('change', () => {
+  dev.godMode = devGodMode.checked;
+});
+devHitboxes.addEventListener('change', () => {
+  dev.showHitboxes = devHitboxes.checked;
+});
+devSlowMotion.addEventListener('change', () => {
+  dev.slowMotion = devSlowMotion.checked;
+});
+devBossFrequency.addEventListener('change', () => {
+  dev.bossFrequency = devBossFrequency.value === 'random' ? 'random' : parseInt(devBossFrequency.value, 10);
+  // Примечание: сами боссы ещё не реализованы в игровой логике — это только
+  // настройка для будущей фичи, чтобы не потерять выбор пользователя.
+});
+
+// checkbox "Бесконечные жизни" стоит checked в разметке по умолчанию — синхронизируем стартовое состояние
+dev.infiniteLives = devInfiniteLives.checked;
