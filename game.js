@@ -177,7 +177,7 @@ function buildBossLevel(lvl) {
   const cw = W / cols;
   const fieldH = 320; // жёстко фиксированная высота поля, не зависит от H
   const ch = fieldH / rows;
-  const top = 45; // поле прижато к верху
+  const top = 15; // почти вплотную к верхней границе канваса
   // Зазор между нижним краем поля и платформой: top + fieldH = 45+320 = 365,
   // платформа на y = H-30 = 570 — то есть ~200px свободного пространства для разгона/прицеливания.
   const cx = Math.floor(cols / 2);
@@ -222,18 +222,19 @@ function buildBossLevel(lvl) {
   });
 }
 
-// Простой Г-образный коридор: заход с одной стороны поля по горизонтали до
-// центральной колонки, затем поворот на 90° и движение вверх к ядру.
-// Это тестовая форма — проще прочитать взглядом, чем спираль, и удобнее для
-// первых прогонов; mirrored разворачивает сторону входа для следующего босса.
+// Г-образный коридор с входом СНИЗУ поля (оттуда прилетает мяч от платформы):
+// узкий вертикальный проход поднимается от нижней границы поля вверх, затем
+// поворачивает по горизонтали к центральной колонке, где расположено ядро.
+// Само поле ячеек при этом всегда доходит до самых краёв канваса — вход не
+// делает в поле "остров", а прорезает коридор прямо в сплошном массиве.
 function buildLShapeCorridorMask(corridor, cols, rows, cx, cy, mirrored) {
-  const startCol = mirrored ? cols - 1 : 0;
-  const stepCol = mirrored ? -1 : 1;
-  for (let c = startCol; mirrored ? c >= cx : c <= cx; c += stepCol) {
-    corridor.add(`${c},${cy}`);
+  const entryCol = mirrored ? cols - 3 : 2; // вход смещён к одному из боков поля
+  for (let r = rows - 1; r >= cy; r--) {
+    corridor.add(`${entryCol},${r}`);
   }
-  for (let r = 0; r <= cy; r++) {
-    corridor.add(`${cx},${r}`);
+  const stepCol = entryCol < cx ? 1 : -1;
+  for (let c = entryCol; c !== cx + stepCol; c += stepCol) {
+    corridor.add(`${c},${cy}`);
   }
 }
 
