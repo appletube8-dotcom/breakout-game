@@ -395,23 +395,26 @@ function buildBossLevel(lvl) {
   // запутанного случая (3 входа сразу).
   const entryCount = bossIndex === 0 ? 1 : 1 + (Math.abs(Math.floor((lvl * 2654435761) / 97)) % 3);
   const entryCols = pickEntryColumns(cols, entryCount);
+  // Раструб на входе — только на первых двух боссах (знакомство с механикой).
+  // Дальше сложность без поблажек, как ты и просил.
+  const easyEntrance = bossIndex < 2;
 
   const corridor = new Set();
   if (variant === 0) {
     // Один или несколько прямых туннелей с камерами, сходящихся к ядру.
-    entryCols.forEach(ec => buildSingleTunnelMask(corridor, cols, rows, cx, cy, ec));
+    entryCols.forEach(ec => buildSingleTunnelMask(corridor, cols, rows, cx, cy, ec, easyEntrance));
   } else if (variant === 1) {
-    buildSpiralCorridorMask(corridor, cols, rows, cx, cy);
+    buildSpiralCorridorMask(corridor, cols, rows, cx, cy, easyEntrance);
   } else if (variant === 2) {
     // Туннель под углом — по диагонали от входа к ядру.
-    buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCols[0]);
+    buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCols[0], easyEntrance);
   } else if (variant === 4) {
     // Гребёнка: несколько одинаковых на вид шахт, но лишь одна ведёт к ядру,
     // остальные — тупики. Игрок не знает заранее, какая настоящая.
-    buildCombMask(corridor, cols, rows, cx, cy);
+    buildCombMask(corridor, cols, rows, cx, cy, easyEntrance);
   } else if (variant === 5) {
     // Змейка: длинный извилистый путь с разворотами через всё поле.
-    buildSnakeMask(corridor, cols, rows, cx, cy, entryCols[0]);
+    buildSnakeMask(corridor, cols, rows, cx, cy, entryCols[0], easyEntrance);
   } else {
     // Пространство за стеной заполнено целиком — никакого готового пути нет,
     // только точки входа в самой стене. Мяч прогрызает себе дорогу сам, по
@@ -466,7 +469,7 @@ function buildBossLevel(lvl) {
 // Только центральная доходит до ядра, остальные обрываются тупиками на
 // середине. Снаружи все выглядят идентично — игрок узнаёт правду, только
 // загнав туда мяч, и это ровно та фрустрация, которая нужна.
-function buildCombMask(corridor, cols, rows, cx, cy) {
+function buildCombMask(corridor, cols, rows, cx, cy, easyEntrance) {
   const shafts = [4, Math.round(cols * 0.3), cx, Math.round(cols * 0.7), cols - 5];
   shafts.forEach((sc, i) => {
     const isTrueShaft = sc === cx;
@@ -477,7 +480,7 @@ function buildCombMask(corridor, cols, rows, cx, cy) {
     // Небольшой раструб (не такой широкий, как у одиночных туннелей — шахты
     // стоят близко друг к другу, широкий раструб слил бы их визуально и
     // выдал бы, какая из них настоящая, раньше времени).
-    addEntranceFunnel(corridor, cols, rows, sc, 2);
+    if (easyEntrance) addEntranceFunnel(corridor, cols, rows, sc, 2);
   });
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
@@ -489,12 +492,12 @@ function buildCombMask(corridor, cols, rows, cx, cy) {
 // Змейка: путь идёт вверх, разворачивается поперёк всего поля, снова вверх и
 // обратно — длинный маршрут с двумя разворотами. Мяч проходит его целиком,
 // только если сохраняет удачный угол на каждом повороте.
-function buildSnakeMask(corridor, cols, rows, cx, cy, entryCol) {
+function buildSnakeMask(corridor, cols, rows, cx, cy, entryCol, easyEntrance) {
   const bandLow = cy + 2;
   for (let r = rows - 1; r >= bandLow; r--) {
     corridor.add(`${entryCol},${r}`);
   }
-  addEntranceFunnel(corridor, cols, rows, entryCol, 4);
+  if (easyEntrance) addEntranceFunnel(corridor, cols, rows, entryCol, 4);
   let dir = entryCol < cx ? 1 : -1;
   let c = entryCol;
   const farEnd = dir > 0 ? cols - 3 : 2;
@@ -532,7 +535,7 @@ function pickEntryColumns(cols, count) {
 // Диагональный туннель — прямая линия от входа снизу к ядру под углом
 // (не строго вертикально-горизонтально, как обычный Г-образный туннель),
 // с двумя камерами-расширениями по пути для рикошета.
-function buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
+function buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCol, easyEntrance) {
   const x0 = entryCol, y0 = rows - 1;
   // Ограничение только по горизонтали (не задеть левую/правую стену) — по
   // вертикали линия сама естественным образом не достаёт до верхней стены,
@@ -541,7 +544,7 @@ function buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
   spiralThickLine(x0, y0, cx, cy, (gx, gy) => {
     if (gx >= 1 && gx <= cols - 2) corridor.add(`${gx},${gy}`);
   });
-  addEntranceFunnel(corridor, cols, rows, entryCol, 4);
+  if (easyEntrance) addEntranceFunnel(corridor, cols, rows, entryCol, 4);
   [0.35, 0.7].forEach(t => {
     const bx = Math.round(x0 + (cx - x0) * t);
     const by = Math.round(y0 + (cy - y0) * t);
@@ -633,18 +636,22 @@ function buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top) {
 // шире обычного туннеля (3-4 клетки), плавно сужаясь к стандартной ширине
 // в 1 клетку. Даёт игроку прощающий заход — не нужно попадать ювелирно
 // точно с первого касания, промах на пару клеток всё равно уводит мяч внутрь.
-function addEntranceFunnel(corridor, cols, rows, entryCol, funnelRows = 4) {
+function addEntranceFunnel(corridor, cols, rows, entryCol, funnelRows = 4, funnelWidth = 1) {
+  // Раньше ширина уменьшалась на каждом ряду (лестница из 4 разных ширин) —
+  // зигзагообразная граница между этой лестницей и обычными кирпичами visually
+  // читалась как "продолжение забора". Теперь ширина постоянна на всех рядах
+  // раструба, переход к обычной ширине происходит одним резким шагом —
+  // получается ровный прямоугольный проём без ступенек.
   for (let i = 0; i < funnelRows; i++) {
     const r = rows - 1 - i;
-    const width = Math.max(0, funnelRows - 1 - i);
-    for (let dx = -width; dx <= width; dx++) {
+    for (let dx = -funnelWidth; dx <= funnelWidth; dx++) {
       const c = entryCol + dx;
       if (c >= 1 && c <= cols - 2) corridor.add(`${c},${r}`);
     }
   }
 }
 
-function buildSingleTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
+function buildSingleTunnelMask(corridor, cols, rows, cx, cy, entryCol, easyEntrance) {
   const bottom = rows - 1;
   const chamberY1 = Math.round(bottom - (bottom - cy) * 0.35);
   const chamberY2 = Math.round(bottom - (bottom - cy) * 0.7);
@@ -659,7 +666,7 @@ function buildSingleTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
       if (c >= 1 && c <= cols - 2) corridor.add(`${c},${r}`);
     }
   }
-  addEntranceFunnel(corridor, cols, rows, entryCol, 4);
+  if (easyEntrance) addEntranceFunnel(corridor, cols, rows, entryCol, 4);
   const stepCol = entryCol < cx ? 1 : -1;
   for (let c = entryCol; c !== cx + stepCol; c += stepCol) {
     corridor.add(`${c},${cy}`);
@@ -678,7 +685,7 @@ function buildSingleTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
 // (модифицированный Брезенхэм с доп. клеткой на диагональных шагах), чтобы
 // коридор был гарантированно 4-связным — без этого мяч мог физически пройти
 // по диагонали через "дыру", а логика игры считала бы клетки не соединёнными.
-function buildSpiralCorridorMask(corridor, cols, rows, cx, cy) {
+function buildSpiralCorridorMask(corridor, cols, rows, cx, cy, easyEntrance) {
   const maxR = Math.min(cx, cy, cols - cx, rows - cy) - 1;
   const turns = 2.4;
   const totalAngle = turns * Math.PI * 2;
@@ -711,7 +718,7 @@ function buildSpiralCorridorMask(corridor, cols, rows, cx, cy) {
   for (let r = rows - 1; r >= firstY; r--) {
     corridor.add(`${firstX},${r}`);
   }
-  addEntranceFunnel(corridor, cols, rows, firstX, 4);
+  if (easyEntrance) addEntranceFunnel(corridor, cols, rows, firstX, 4);
 }
 
 function spiralThickLine(x0, y0, x1, y1, cb) {
