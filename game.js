@@ -35,6 +35,9 @@ const sfx = {
   catchFire:  () => { tone(180, 0.05, 'sawtooth', 0.16); setTimeout(() => tone(140, 0.18, 'sawtooth', 0.14, 90), 30); },
   catchMulti: () => { [700, 850, 1000].forEach((f, i) => setTimeout(() => tone(f, 0.06, 'square', 0.11), i * 45)); },
   catchSlow:  () => tone(520, 0.35, 'sine', 0.13, 190),
+  // Вредный бонус — резкий нисходящий "провал", на слух сразу понятно, что
+  // случилось что-то плохое, в отличие от восходящих тонов полезных бонусов.
+  catchShrink: () => { tone(260, 0.16, 'sawtooth', 0.16, 120); setTimeout(() => tone(160, 0.22, 'square', 0.13, 80), 90); },
 };
 document.addEventListener('mousedown', initAudio, { once: true });
 document.addEventListener('keydown', initAudio, { once: true });
@@ -48,17 +51,16 @@ const W = canvas.width;
 const H = canvas.height;
 
 const $ = id => document.getElementById(id);
-const scoreEl = $('score'), levelEl = $('level'), livesEl = $('lives'), bestEl = $('best');
+const levelEl = $('level'), livesEl = $('lives'), bestEl = $('best');
 const overlay = $('overlay'), startBtn = $('startBtn');
 
 // Подгружаем рекорд сразу при загрузке страницы, а не только при старте игры
-bestEl.textContent = localStorage.getItem('spaceBreakBest') || 0;
+bestEl.textContent = localStorage.getItem('neonBreakoutBestLevel') || 1;
 
 // ---- Состояние игры ----
 let state = {
   running: false,
   paused: false,
-  score: 0,
   lives: 3,
   level: 1,
 };
@@ -67,7 +69,7 @@ function togglePause() {
   state.paused = !state.paused;
   if (state.paused) {
     overlay.querySelector('h1').textContent = 'Пауза';
-    overlay.querySelector('p').textContent = `Счёт: ${state.score} · нажми "Продолжить" или P`;
+    overlay.querySelector('p').textContent = `Уровень ${state.level} · нажми "Продолжить" или P`;
     startBtn.textContent = 'Продолжить';
     overlay.classList.remove('hidden');
   } else {
@@ -91,7 +93,7 @@ let bricks = [];
 let bonuses = [];
 let particles = [];
 let stars = [];
-let powers = { slowToken: 0, bigToken: 0, fireToken: 0 }; // активные бонусы { fire, big, multi, slowActive, slowToken }
+let powers = { slowToken: 0, bigToken: 0, fireToken: 0, shrinkToken: 0 }; // активные бонусы { fire, big, multi, slowActive, slowToken }
 let shake = { time: 0, power: 0 };
 
 // ---- Режим разработчика ----
@@ -151,18 +153,17 @@ function isBossLevel(lvl) {
   return lvl % freq === 0;
 }
 
-// Платформа на boss-уровнях уже (меньше пространства для ошибки, точнее нужно
-// целиться), чем на обычных — как ты и просил. Если в момент смены уровня
-// активен Big-бонус, не сбрасываем его резко — эффект доиграет как обычно,
-// просто "домашняя" ширина, к которой он потом вернётся, будет другой.
-function applyPlatformWidthForLevel(isBoss) {
-  platform.levelBaseW = isBoss ? Math.round(platform.baseW * 0.72) : platform.baseW;
-  if (!powers.big) platform.w = platform.levelBaseW;
+// Платформа одинаковая на всех уровнях, включая боссов — её размер меняют
+// ТОЛЬКО бонусы (big увеличивает, shrink уменьшает). levelBaseW сохранён как
+// единая точка отсчёта, к которой бонусы возвращают платформу по истечении.
+function applyPlatformWidthForLevel() {
+  platform.levelBaseW = platform.baseW;
+  if (!powers.big && !powers.shrink) platform.w = platform.levelBaseW;
 }
 
 // 0 - пусто, 1 - обычный, 2 - крепкий
 function buildLevel(lvl) {
-  applyPlatformWidthForLevel(isBossLevel(lvl));
+  applyPlatformWidthForLevel();
   if (isBossLevel(lvl)) {
     buildBossLevel(lvl);
     return;
@@ -417,41 +418,44 @@ function buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
 // на стыках соседних ячеек стены (см. комментарий в buildBossLevel выше).
 // Верх/низ — на всю ширину (включая углы); лево/право — только между ними,
 // чтобы не задваивать сами углы.
+// Строит неразрушимую границу поля крупными цельными сегментами.
+// Углы НЕ являются отдельными кусками и не образуют стыков: левая и правая
+// полосы идут на всю высоту поля (включая свои углы), а верхняя и нижняя —
+// только между ними. Так в каждом углу находится ровно один прямоугольник,
+// а не два состыкованных, и мяч физически не может поймать "внутренний угол"
+// на ровном участке. Зазор между сегментами тоже убран (раньше каждый кусок
+// рисовался на 2px уже, что оставляло видимые щели вдоль всей рамки).
 function buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top) {
+  const fieldBottom = top + rows * ch;
   function pushSegment(x0, y0, x1, y1) {
+    if (x1 - x0 <= 0 || y1 - y0 <= 0) return;
     bricks.push({
       x: (x0 + x1) / 2, y: (y0 + y1) / 2,
-      w: (x1 - x0) - 2, h: (y1 - y0) - 2,
+      w: x1 - x0, h: y1 - y0,
       hp: 1, maxHp: 1, alive: true,
       isBossCell: true, indestructible: true,
     });
   }
-  function scanRow(r) {
+
+  // Левая и правая полосы — цельные, на всю высоту поля вместе с углами.
+  pushSegment(0, top, cw, fieldBottom);
+  pushSegment(W - cw, top, W, fieldBottom);
+
+  // Верхняя и нижняя полосы — только в промежутке между боковыми полосами,
+  // разрываются лишь там, где проходят реальные входы в конструкцию.
+  function scanHorizontalBand(r, y0, y1) {
     let start = null;
-    for (let c = 0; c <= cols; c++) {
-      const isWall = c < cols && !corridor.has(`${c},${r}`);
+    for (let c = 1; c <= cols - 1; c++) {
+      const isWall = c < cols - 1 && !corridor.has(`${c},${r}`);
       if (isWall && start === null) start = c;
-      if ((!isWall || c === cols) && start !== null) {
-        pushSegment(start * cw, top + r * ch, c * cw, top + (r + 1) * ch);
+      if ((!isWall || c === cols - 1) && start !== null) {
+        pushSegment(start * cw, y0, c * cw, y1);
         start = null;
       }
     }
   }
-  function scanCol(c, rFrom, rTo) {
-    let start = null;
-    for (let r = rFrom; r <= rTo + 1; r++) {
-      const isWall = r <= rTo && !corridor.has(`${c},${r}`);
-      if (isWall && start === null) start = r;
-      if ((!isWall || r === rTo + 1) && start !== null) {
-        pushSegment(c * cw, top + start * ch, (c + 1) * cw, top + r * ch);
-        start = null;
-      }
-    }
-  }
-  scanRow(0);
-  scanRow(rows - 1);
-  scanCol(0, 1, rows - 2);
-  scanCol(cols - 1, 1, rows - 2);
+  scanHorizontalBand(0, top, top + ch);
+  scanHorizontalBand(rows - 1, fieldBottom - ch, fieldBottom);
 }
 
 // Один туннель с входом СНИЗУ поля и двумя "камерами" — расширениями до 3
@@ -550,11 +554,13 @@ function spiralThickLine(x0, y0, x1, y1, cb) {
 
 // ---- Мячи ----
 function baseBallSpeed() {
-  // Откачено по просьбе: скорость больше не растёт с уровнем, всегда как на 1-м.
+  // Скорость не растёт с уровнем — на боссах и на 1 уровне одинаковая.
   return 5.5;
 }
 function maxBallSpeed() {
-  return 11;
+  // Потолок был 11 — вдвое выше стартовой, мяч успевал сильно разогнаться
+  // за уровень. Теперь максимум +15% от старта, разгон почти не ощущается.
+  return 6.3;
 }
 
 function spawnBalls(n = 1) {
@@ -584,6 +590,10 @@ const BONUS_TYPES = [
   { id: 'fire', label: 'Огненный мяч', color: '#ff6f3c' },
   { id: 'multi', label: 'Тройной мяч', color: '#b48cff' },
   { id: 'slow', label: 'Замедление', color: '#5ec8ff' },
+  // Вредный бонус — сужает платформу на время. Красный цвет и предупреждающая
+  // иконка дают игроку шанс сообразить, что этот ловить НЕ надо, и уйти с его
+  // траектории — это и создаёт то самое напряжение при падающем бонусе.
+  { id: 'shrink', label: 'Узкая пластина', color: '#ff3b5c', harmful: true },
 ];
 
 function spawnBonus(x, y, chance = 0.22) {
@@ -596,6 +606,7 @@ function spawnBonus(x, y, chance = 0.22) {
     type: b.id,
     label: b.label,
     color: b.color,
+    harmful: !!b.harmful,
     ang: 0,
   });
 }
@@ -667,11 +678,16 @@ function playBonusCatchSound(type) {
   else if (type === 'fire') sfx.catchFire();
   else if (type === 'multi') sfx.catchMulti();
   else if (type === 'slow') sfx.catchSlow();
+  else if (type === 'shrink') sfx.catchShrink();
   else sfx.bonus();
 }
 
 function applyBonus(type) {
   if (type === 'big') {
+    // Big и Shrink взаимоисключающие — поймав Big, игрок снимает сужение,
+    // иначе два противоположных эффекта дрались бы за ширину платформы.
+    powers.shrink = false;
+    powers.shrinkToken++;
     platform.w = Math.min(platform.levelBaseW * 1.8, platform.w * 1.35);
     powers.big = true;
     // Баг из прошлой версии: повторная поимка Big во время уже активного эффекта
@@ -747,6 +763,20 @@ function applyBonus(type) {
         b.vy *= scale;
       });
     }, 8000);
+  } else if (type === 'shrink') {
+    // Вредный бонус: сужает платформу на 10с. Взаимоисключающий с Big —
+    // поймав Shrink, игрок теряет активное расширение. Защита от стакинга
+    // тем же токен-паттерном, что у остальных временных эффектов.
+    powers.big = false;
+    powers.bigToken++;
+    powers.shrink = true;
+    platform.w = Math.max(platform.levelBaseW * 0.55, platform.levelBaseW * 0.55);
+    const myToken = ++powers.shrinkToken;
+    setTimeout(() => {
+      if (powers.shrinkToken !== myToken) return;
+      powers.shrink = false;
+      platform.w = platform.levelBaseW;
+    }, 10000);
   }
 }
 
@@ -811,16 +841,13 @@ function hitBrick(ball, brick) {
   brick.hp--;
   const color = brick.pal;
   explode(ball.x, ball.y, color, 10);
-  state.score += 50;
   sfx.brick(brick.maxHp);
 
   if (brick.hp <= 0) {
     brick.alive = false;
-    state.score += 100;
 
     if (brick.isBossCore) {
       // Ядро спирали разрушено правильным прохождением — награда за успешное прохождение.
-      state.score += 500;
       spawnBonus(brick.x, brick.y, 1);
       explode(brick.x, brick.y, '#ffe14d', 40);
       triggerShake(9, 260);
@@ -838,7 +865,7 @@ function hitBrick(ball, brick) {
       triggerShake(brick.maxHp >= 3 ? 6 : brick.maxHp === 2 ? 3.5 : 1.5, brick.maxHp >= 2 ? 160 : 100);
     }
   }
-  updateScore();
+
 }
 
 // ---- Логика ----
@@ -878,7 +905,10 @@ function update() {
         if (paddleCollision) {
           const hit = Math.max(-1, Math.min(1, (b.x - platform.x) / (platform.w / 2)));
           const angle = hit * (Math.PI / 3);
-          const speed = Math.min(Math.hypot(b.vx, b.vy) * 1.02, maxBallSpeed());
+          // Разгон "самую малость": было 1.02 на каждый отскок, что за 50
+          // отскоков разгоняло мяч почти вдвое. Теперь 1.004 с низким потолком —
+          // ускорение едва заметное и упирается в предел очень быстро.
+          const speed = Math.min(Math.hypot(b.vx, b.vy) * 1.004, maxBallSpeed());
           b.vx = Math.sin(angle) * speed;
           b.vy = -Math.abs(Math.cos(angle) * speed);
           b.y = platform.y - platform.h / 2 - b.r - 0.5;
@@ -961,8 +991,7 @@ function update() {
         bo.x >= platform.x - platform.w / 2 - bo.r &&
         bo.x <= platform.x + platform.w / 2 + bo.r) {
       applyBonus(bo.type);
-      state.score += 150;
-      updateScore();
+
       explode(bo.x, bo.y, bo.color, 14);
       showBuff(bo.label, bo.color);
       playBonusCatchSound(bo.type);
@@ -1004,6 +1033,7 @@ function update() {
   if (state.running && balls.length > 0 && bricks.every(b => !b.alive)) {
     state.level++;
     levelEl.textContent = state.level;
+    updateBestLevel();
     buildLevel(state.level);
     resetBall();
     sfx.win();
@@ -1165,6 +1195,12 @@ function drawBrick(br) {
   ctx.fillStyle = col;
   ctx.fillRect(br.x - br.w / 2, br.y - br.h / 2, br.w, br.h);
   ctx.shadowBlur = 0;
+  // Неразрушимая рамка — сплошная заливка без обводки и бликов: любая обводка
+  // на отдельных сегментах визуально воссоздаёт "стыки", которых мы избегаем.
+  if (br.indestructible) {
+    ctx.restore();
+    return;
+  }
   // неоновая рамка
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
@@ -1214,6 +1250,17 @@ function drawBonusIcon(bo) {
   ctx.fill();
   ctx.shadowBlur = 0;
 
+  // Вредный бонус пульсирует тревожной обводкой — визуальный сигнал, что этот
+  // ловить не нужно, и у игрока есть шанс успеть увести платформу в сторону.
+  if (bo.harmful) {
+    const pulse = 0.5 + 0.5 * Math.abs(Math.sin(bo.ang * 3));
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 + pulse * 0.5})`;
+    ctx.lineWidth = 1.5 + pulse * 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, bo.r + 2 + pulse * 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
   // Уникальный силуэт внутри — узнаётся на глаз без чтения подписи.
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#ffffff';
@@ -1253,6 +1300,17 @@ function drawBonusIcon(bo) {
     ctx.moveTo(-r * 0.4, -r * 0.5); ctx.lineTo(r * 0.4, -r * 0.5);
     ctx.lineTo(-r * 0.4, r * 0.5); ctx.lineTo(r * 0.4, r * 0.5);
     ctx.closePath();
+    ctx.stroke();
+  } else if (bo.type === 'shrink') {
+    // Сходящиеся стрелки → ← — зеркально противоположно Big, читается как "сжатие"
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.6, 0); ctx.lineTo(-r * 0.12, 0);
+    ctx.moveTo(-r * 0.12, 0); ctx.lineTo(-r * 0.38, -r * 0.26);
+    ctx.moveTo(-r * 0.12, 0); ctx.lineTo(-r * 0.38, r * 0.26);
+    ctx.moveTo(r * 0.6, 0); ctx.lineTo(r * 0.12, 0);
+    ctx.moveTo(r * 0.12, 0); ctx.lineTo(r * 0.38, -r * 0.26);
+    ctx.moveTo(r * 0.12, 0); ctx.lineTo(r * 0.38, r * 0.26);
     ctx.stroke();
   }
 
@@ -1323,12 +1381,13 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
-// ---- Счёт ----
-function updateScore() {
-  scoreEl.textContent = state.score;
-  if (state.score > parseInt(bestEl.textContent || '0')) {
-    bestEl.textContent = state.score;
-    localStorage.setItem('spaceBreakBest', state.score);
+// ---- Прогресс (лучший достигнутый уровень) ----
+// Очки из игры убраны намеренно: цель — пройти как можно дальше, а не
+// набирать счёт, поэтому единственная сохраняемая метрика — номер уровня.
+function updateBestLevel() {
+  if (state.level > parseInt(bestEl.textContent || '1', 10)) {
+    bestEl.textContent = state.level;
+    localStorage.setItem('neonBreakoutBestLevel', state.level);
   }
 }
 
@@ -1336,12 +1395,11 @@ function updateScore() {
 function startGame() {
   dev.active = false;
   devPanel.classList.add('hidden');
-  state = { running: true, paused: false, score: 0, lives: 3, level: 1 };
+  state = { running: true, paused: false, lives: 3, level: 1 };
   platform.w = platform.baseW;
-  powers = { slowToken: 0, bigToken: 0, fireToken: 0 };
+  powers = { slowToken: 0, bigToken: 0, fireToken: 0, shrinkToken: 0 };
   const saved = localStorage.getItem('spaceBreakBest');
   bestEl.textContent = saved || 0;
-  scoreEl.textContent = 0;
   livesEl.textContent = state.lives;
   levelEl.textContent = 1;
   bonuses = [];
@@ -1354,7 +1412,7 @@ function startGame() {
 function gameOver() {
   state.running = false;
   overlay.querySelector('h1').textContent = 'Игра окончена';
-  overlay.querySelector('p').textContent = `Счёт: ${state.score}`;
+  overlay.querySelector('p').textContent = `Ты дошёл до уровня ${state.level}`;
   startBtn.textContent = 'Ещё раз';
   sfx.lose();
   overlay.classList.remove('hidden');
@@ -1448,10 +1506,9 @@ function openDevMode() {
   overlay.classList.add('hidden');
   devPanel.classList.remove('hidden');
   // Стартуем сразу играбельную сессию, чтобы можно было тестировать уровни вживую.
-  state = { running: true, paused: false, score: 0, lives: dev.infiniteLives ? Infinity : 3, level: 1 };
+  state = { running: true, paused: false, lives: dev.infiniteLives ? Infinity : 3, level: 1 };
   platform.w = platform.baseW;
-  powers = { slowToken: 0, bigToken: 0, fireToken: 0 };
-  scoreEl.textContent = 0;
+  powers = { slowToken: 0, bigToken: 0, fireToken: 0, shrinkToken: 0 };
   livesEl.textContent = dev.infiniteLives ? '∞' : state.lives;
   levelEl.textContent = 1;
   bonuses = [];
@@ -1530,6 +1587,7 @@ devForceBig.addEventListener('click', () => applyBonus('big'));
 devForceFire.addEventListener('click', () => applyBonus('fire'));
 devForceMulti.addEventListener('click', () => applyBonus('multi'));
 devForceSlow.addEventListener('click', () => applyBonus('slow'));
+document.getElementById('devForceShrink').addEventListener('click', () => applyBonus('shrink'));
 devBonusesDisabled.addEventListener('change', () => {
   dev.bonusesDisabled = devBonusesDisabled.checked;
 });
