@@ -89,6 +89,8 @@ const platform = {
 };
 
 let balls = [];
+// Максимум мячей на экране одновременно (потолок стакинга Multi-бонуса).
+const MAX_BALLS = 100;
 let bricks = [];
 let bonuses = [];
 let particles = [];
@@ -801,8 +803,15 @@ function spawnBonus(x, y, chance = 0.22) {
 }
 
 // ---- Частицы ----
+// Потолок числа частиц. Без него при максимуме мячей (каждое попадание в
+// кирпич добавляет 10-18 частиц) они накапливались быстрее, чем затухали,
+// и кадр проседал на ровном месте.
+const MAX_PARTICLES = 400;
+
 function explode(x, y, color, n = 12) {
+  if (particles.length >= MAX_PARTICLES) return;
   for (let i = 0; i < n; i++) {
+    if (particles.length >= MAX_PARTICLES) break;
     const a = Math.random() * Math.PI * 2;
     const sp = Math.random() * 4 + 1;
     particles.push({
@@ -906,12 +915,15 @@ function applyBonus(type) {
     // Решение по балансу: multi не снимается таймером (в отличие от big/fire),
     // потому что лишние мячи сами по себе теряются, падая за платформу —
     // это естественное затухание эффекта, а не бесконечный баф.
-    // Потолок в 8 мячей убран по просьбе — при стаке бонусов их может быть
-    // сколько угодно, это и есть кайф от накопления Multi.
+    // Потолок в 100 мячей выставлен по присланному скриншоту — примерно
+    // столько влезает в кадр, оставаясь читаемым. Рост тройной (1→3→9→27→81),
+    // так что упереться в предел можно за 5 подряд пойманных бонусов.
+    if (balls.length >= MAX_BALLS) return;
     const n = balls.length;
     // Минимум ~23° между новыми мячами одного источника, чтобы они не слипались визуально.
     const minSpread = 0.4;
     for (let i = 0; i < n * 2; i++) {
+      if (balls.length >= MAX_BALLS) break;
       const src = balls[Math.floor(Math.random() * n)];
       const baseAng = Math.atan2(src.vy, src.vx);
       const side = i % 2 === 0 ? 1 : -1;
@@ -1110,6 +1122,12 @@ function update() {
 
       for (const br of bricks) {
         if (!br.alive || hitThisFrame.has(br)) continue;
+        // Дешёвая AABB-отсечка перед точной проверкой: при максимуме мячей
+        // (100) и плотной сетке боссов (480 ячеек) выходило 144 000 полных
+        // проверок за кадр с вызовом функции и sqrt внутри. Эти четыре
+        // сравнения отсекают подавляющее большинство пар почти бесплатно.
+        if (Math.abs(b.x - br.x) > br.w / 2 + b.r) continue;
+        if (Math.abs(b.y - br.y) > br.h / 2 + b.r) continue;
         const collision = circleRectCollision(b, br);
         if (!collision) continue;
 
@@ -1390,15 +1408,13 @@ function drawBossWallMonolithic() {
   g.addColorStop(0.5, '#2b3550');
   g.addColorStop(1, '#161a26');
   ctx.fillStyle = g;
+  // Свечение даёт тень на самой заливке, а НЕ обводка. Раньше здесь был
+  // ctx.stroke() по всему пути — он обводил и прямоугольники-вырезы под
+  // входы, рисуя вокруг каждого входа лишнюю рамку-коробочку. Тень следует
+  // фактической форме залитой фигуры, поэтому у проёмов ничего не появляется.
+  ctx.shadowColor = 'rgba(90, 170, 255, 0.5)';
+  ctx.shadowBlur = 12;
   ctx.fill('evenodd');
-
-  // Неоновый кант по всему контуру рамки разом — обе окружности (внешняя и
-  // внутренняя граница интерьера) обводятся одним stroke, тоже без стыков.
-  ctx.strokeStyle = 'rgba(120, 200, 255, 0.8)';
-  ctx.lineWidth = 2;
-  ctx.shadowColor = 'rgba(90, 180, 255, 0.85)';
-  ctx.shadowBlur = 8;
-  ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.restore();
 }
@@ -1559,15 +1575,26 @@ function drawBall(b) {
     color = '#ffd24f';
     glow = '#ff7a3c';
   }
-  ctx.shadowColor = glow;
-  ctx.shadowBlur = 20;
+  // При большом количестве мячей отключаем и свечение, и радиальный градиент:
+  // создание градиента на КАЖДЫЙ мяч КАЖДЫЙ кадр плюс shadowBlur — самые
+  // дорогие операции здесь. При 30+ мячах свечение всё равно сливается
+  // в сплошное пятно, так что визуально мы почти ничего не теряем.
+  const richBall = balls.length <= 30;
+  if (richBall) {
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = 20;
+  }
   ctx.beginPath();
   ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-  const g = ctx.createRadialGradient(b.x - 3, b.y - 3, 2, b.x, b.y, b.r);
-  g.addColorStop(0, '#ffffff');
-  g.addColorStop(0.5, color);
-  g.addColorStop(1, glow);
-  ctx.fillStyle = g;
+  if (richBall) {
+    const g = ctx.createRadialGradient(b.x - 3, b.y - 3, 2, b.x, b.y, b.r);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.5, color);
+    g.addColorStop(1, glow);
+    ctx.fillStyle = g;
+  } else {
+    ctx.fillStyle = color;
+  }
   ctx.fill();
   ctx.shadowBlur = 0;
   // огненный хвост
