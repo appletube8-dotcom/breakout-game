@@ -168,6 +168,7 @@ function buildLevel(lvl) {
     buildBossLevel(lvl);
     return;
   }
+  bossWallGeom = null; // не boss-уровень — монолитную рамку рисовать не нужно
   bricks = [];
   // Более мелкая сетка, чем раньше — больше ячеек, каждая уже (было 10 колонок
   // по 62px, стало 16 колонок по 42px) — больше пространства для манёвра мяча
@@ -377,15 +378,22 @@ function buildBossLevel(lvl) {
   const fieldH = 280;
   const ch = fieldH / rows;
   const top = 12;
-  bossFieldCenterY = top + fieldH / 2;
   const cx = Math.floor(cols / 2);
   // Позиция ядра зависит от формы: туннелям и диагонали нужен долгий путь
   // (ядро ближе к верху), спирали — простор со всех сторон (ядро в центре).
-  const variant = Math.floor(lvl / 5) % 6;
+  // Порядок сложности: первый босс — самый щадящий (прямой туннель с широким
+  // раструбом на входе), дальше сложность нарастает. Спираль (дезориентирует)
+  // и полностью заполненное поле (самое тяжёлое, никакого готового пути) идут
+  // ближе к концу цикла, а не могут выпасть уже на 5-м уровне.
+  const bossOrder = [0, 2, 4, 5, 1, 3];
+  const bossIndex = Math.floor(lvl / 5) - 1;
+  const variant = bossOrder[((bossIndex % bossOrder.length) + bossOrder.length) % bossOrder.length];
   const cy = variant === 1 ? Math.floor(rows / 2) : 3;
 
-  // Число входов — от 1 до 3, меняется по номеру уровня, как ты просил.
-  const entryCount = 1 + (Math.abs(Math.floor((lvl * 2654435761) / 97)) % 3);
+  // Число входов — от 1 до 3, меняется по номеру уровня. Первый босс —
+  // всегда 1 вход, чтобы знакомство с механикой не начиналось с самого
+  // запутанного случая (3 входа сразу).
+  const entryCount = bossIndex === 0 ? 1 : 1 + (Math.abs(Math.floor((lvl * 2654435761) / 97)) % 3);
   const entryCols = pickEntryColumns(cols, entryCount);
 
   const corridor = new Set();
@@ -466,6 +474,10 @@ function buildCombMask(corridor, cols, rows, cx, cy) {
     for (let r = rows - 1; r >= depth; r--) {
       if (sc >= 1 && sc <= cols - 2) corridor.add(`${sc},${r}`);
     }
+    // Небольшой раструб (не такой широкий, как у одиночных туннелей — шахты
+    // стоят близко друг к другу, широкий раструб слил бы их визуально и
+    // выдал бы, какая из них настоящая, раньше времени).
+    addEntranceFunnel(corridor, cols, rows, sc, 2);
   });
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
@@ -482,6 +494,7 @@ function buildSnakeMask(corridor, cols, rows, cx, cy, entryCol) {
   for (let r = rows - 1; r >= bandLow; r--) {
     corridor.add(`${entryCol},${r}`);
   }
+  addEntranceFunnel(corridor, cols, rows, entryCol, 4);
   let dir = entryCol < cx ? 1 : -1;
   let c = entryCol;
   const farEnd = dir > 0 ? cols - 3 : 2;
@@ -528,6 +541,7 @@ function buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
   spiralThickLine(x0, y0, cx, cy, (gx, gy) => {
     if (gx >= 1 && gx <= cols - 2) corridor.add(`${gx},${gy}`);
   });
+  addEntranceFunnel(corridor, cols, rows, entryCol, 4);
   [0.35, 0.7].forEach(t => {
     const bx = Math.round(x0 + (cx - x0) * t);
     const by = Math.round(y0 + (cy - y0) * t);
@@ -557,6 +571,10 @@ function buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
 // а не два состыкованных, и мяч физически не может поймать "внутренний угол"
 // на ровном участке. Зазор между сегментами тоже убран (раньше каждый кусок
 // рисовался на 2px уже, что оставляло видимые щели вдоль всей рамки).
+// Глобальное хранилище геометрии рамки boss-уровня для монолитной отрисовки
+// (см. drawBossWallMonolithic ниже) — заполняется в buildPerimeterWallSegments.
+let bossWallGeom = null;
+
 function buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top) {
   const fieldBottom = top + rows * ch;
   function pushSegment(x0, y0, x1, y1) {
@@ -575,6 +593,9 @@ function buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top) {
 
   // Верхняя и нижняя полосы — только в промежутке между боковыми полосами,
   // разрываются лишь там, где проходят реальные входы в конструкцию.
+  // Одновременно фиксируем точные пиксельные границы каждого отверстия —
+  // они понадобятся для отрисовки рамки одним цельным путём без стыков.
+  const gaps = [];
   function scanHorizontalBand(r, y0, y1) {
     let start = null;
     for (let c = 1; c <= cols - 1; c++) {
@@ -585,9 +606,21 @@ function buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top) {
         start = null;
       }
     }
+    // Отдельным проходом собираем сами дыры (инверсия того же скана).
+    let gapStart = null;
+    for (let c = 0; c <= cols; c++) {
+      const isGap = c < cols && corridor.has(`${c},${r}`);
+      if (isGap && gapStart === null) gapStart = c;
+      if ((!isGap || c === cols) && gapStart !== null) {
+        gaps.push({ x0: gapStart * cw, y0, x1: c * cw, y1 });
+        gapStart = null;
+      }
+    }
   }
   scanHorizontalBand(0, top, top + ch);
   scanHorizontalBand(rows - 1, fieldBottom - ch, fieldBottom);
+
+  bossWallGeom = { top, fieldBottom, cw, ch, gaps };
 }
 
 // Один туннель с входом СНИЗУ поля и двумя "камерами" — расширениями до 3
@@ -596,6 +629,21 @@ function buildPerimeterWallSegments(cols, rows, corridor, cw, ch, top) {
 // достаточно широк, чтобы мяч реально рикошетил из стороны в сторону и
 // разбивал ячейки по бокам — в туннеле шириной 1 клетка это физически
 // невозможно, поэтому камеры обязательны для задуманной механики.
+// Раструб у самого входа: первые несколько рядов от нижней границы поля
+// шире обычного туннеля (3-4 клетки), плавно сужаясь к стандартной ширине
+// в 1 клетку. Даёт игроку прощающий заход — не нужно попадать ювелирно
+// точно с первого касания, промах на пару клеток всё равно уводит мяч внутрь.
+function addEntranceFunnel(corridor, cols, rows, entryCol, funnelRows = 4) {
+  for (let i = 0; i < funnelRows; i++) {
+    const r = rows - 1 - i;
+    const width = Math.max(0, funnelRows - 1 - i);
+    for (let dx = -width; dx <= width; dx++) {
+      const c = entryCol + dx;
+      if (c >= 1 && c <= cols - 2) corridor.add(`${c},${r}`);
+    }
+  }
+}
+
 function buildSingleTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
   const bottom = rows - 1;
   const chamberY1 = Math.round(bottom - (bottom - cy) * 0.35);
@@ -611,6 +659,7 @@ function buildSingleTunnelMask(corridor, cols, rows, cx, cy, entryCol) {
       if (c >= 1 && c <= cols - 2) corridor.add(`${c},${r}`);
     }
   }
+  addEntranceFunnel(corridor, cols, rows, entryCol, 4);
   const stepCol = entryCol < cx ? 1 : -1;
   for (let c = entryCol; c !== cx + stepCol; c += stepCol) {
     corridor.add(`${c},${cy}`);
@@ -662,6 +711,7 @@ function buildSpiralCorridorMask(corridor, cols, rows, cx, cy) {
   for (let r = rows - 1; r >= firstY; r--) {
     corridor.add(`${firstX},${r}`);
   }
+  addEntranceFunnel(corridor, cols, rows, firstX, 4);
 }
 
 function spiralThickLine(x0, y0, x1, y1, cb) {
@@ -849,27 +899,25 @@ function applyBonus(type) {
     // Решение по балансу: multi не снимается таймером (в отличие от big/fire),
     // потому что лишние мячи сами по себе теряются, падая за платформу —
     // это естественное затухание эффекта, а не бесконечный баф.
-    if (balls.length < 8) {
-      const n = balls.length;
-      // Минимум ~23° между новыми мячами одного источника, чтобы они не слипались визуально.
-      const minSpread = 0.4;
-      for (let i = 0; i < n * 2; i++) {
-        const src = balls[Math.floor(Math.random() * n)];
-        const baseAng = Math.atan2(src.vy, src.vx);
-        const side = i % 2 === 0 ? 1 : -1;
-        const ang = baseAng + side * (minSpread + Math.random() * 0.8);
-        const sp = Math.hypot(src.vx, src.vy);
-        balls.push({
-          x: src.x, y: src.y,
-          r: src.r,
-          vx: Math.cos(ang) * sp,
-          vy: Math.sin(ang) * sp,
-          stuck: false,
-          fire: powers.fire,
-        });
-      }
-      // оставляем не больше 8, обрезаем лишние
-      if (balls.length > 8) balls.length = 8;
+    // Потолок в 8 мячей убран по просьбе — при стаке бонусов их может быть
+    // сколько угодно, это и есть кайф от накопления Multi.
+    const n = balls.length;
+    // Минимум ~23° между новыми мячами одного источника, чтобы они не слипались визуально.
+    const minSpread = 0.4;
+    for (let i = 0; i < n * 2; i++) {
+      const src = balls[Math.floor(Math.random() * n)];
+      const baseAng = Math.atan2(src.vy, src.vx);
+      const side = i % 2 === 0 ? 1 : -1;
+      const ang = baseAng + side * (minSpread + Math.random() * 0.8);
+      const sp = Math.hypot(src.vx, src.vy);
+      balls.push({
+        x: src.x, y: src.y,
+        r: src.r,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp,
+        stuck: false,
+        fire: powers.fire,
+      });
     }
   } else if (type === 'slow') {
     powers.slowActive = (powers.slowActive || 0) + 1;
@@ -1256,6 +1304,7 @@ function draw() {
     if (!br.alive) continue;
     drawBrick(br);
   }
+  drawBossWallMonolithic();
 
   // бонусы
   for (const bo of bonuses) {
@@ -1311,63 +1360,53 @@ function drawHitboxes() {
   ctx.restore();
 }
 
-let liveBrickCountCache = 0;
-// Вертикальный центр поля boss-уровня — нужен отрисовке рамки, чтобы понять,
-// какая её кромка обращена внутрь конструкции (см. drawIndestructibleWall).
-let bossFieldCenterY = H / 2;
+// Отрисовка неразрушимой рамки ЦЕЛИКОМ, одним путём — единственный надёжный
+// способ убрать стыки насовсем. Путь строится из внешнего прямоугольника
+// (границы поля), внутреннего прямоугольника (вырезающего весь интерьер) и
+// по одному маленькому прямоугольнику на каждый вход (довырезающему проём
+// прямо в толще стены). Заливаем всё разом по правилу evenodd: точка внутри
+// нечётного числа контуров — часть стены, внутри чётного — пусто. Так как
+// это ОДИН вызов fill на всю рамку, а не N соседних fillRect, физически не
+// может быть видимой границы между соседними кусками — её просто нет.
+function drawBossWallMonolithic() {
+  if (!bossWallGeom) return;
+  const { top, fieldBottom, cw, ch, gaps } = bossWallGeom;
 
-// Отрисовка неразрушимой рамки: холодный градиент сталь→индиго поперёк
-// сегмента и тонкий неоновый кант по кромке, обращённой внутрь конструкции.
-// Сторона канта определяется по геометрии самого сегмента (вертикальный он
-// или горизонтальный и с какого края поля стоит), поэтому кант ложится ровной
-// непрерывной линией по внутреннему периметру, не проявляя стыков.
-function drawIndestructibleWall(br) {
-  const x0 = br.x - br.w / 2, y0 = br.y - br.h / 2;
-  const isVertical = br.h > br.w;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, top, W, fieldBottom - top);
+  ctx.rect(cw, top + ch, W - 2 * cw, (fieldBottom - top) - 2 * ch);
+  gaps.forEach(g => ctx.rect(g.x0, g.y0, g.x1 - g.x0, g.y1 - g.y0));
 
-  const g = isVertical
-    ? ctx.createLinearGradient(x0, 0, x0 + br.w, 0)
-    : ctx.createLinearGradient(0, y0, 0, y0 + br.h);
+  const g = ctx.createLinearGradient(0, top, 0, fieldBottom);
   g.addColorStop(0, '#1b2030');
-  g.addColorStop(0.45, '#2b3550');
+  g.addColorStop(0.5, '#2b3550');
   g.addColorStop(1, '#161a26');
   ctx.fillStyle = g;
-  ctx.fillRect(x0, y0, br.w, br.h);
+  ctx.fill('evenodd');
 
-  // Неоновый кант — только по внутренней кромке.
-  ctx.strokeStyle = 'rgba(120, 200, 255, 0.85)';
+  // Неоновый кант по всему контуру рамки разом — обе окружности (внешняя и
+  // внутренняя граница интерьера) обводятся одним stroke, тоже без стыков.
+  ctx.strokeStyle = 'rgba(120, 200, 255, 0.8)';
   ctx.lineWidth = 2;
-  ctx.shadowColor = 'rgba(90, 180, 255, 0.9)';
-  ctx.shadowBlur = 10;
-  ctx.beginPath();
-  if (isVertical) {
-    // Боковая полоса: внутрь смотрит та вертикальная кромка, что ближе к центру канваса.
-    const edgeX = br.x < W / 2 ? x0 + br.w - 1 : x0 + 1;
-    ctx.moveTo(edgeX, y0);
-    ctx.lineTo(edgeX, y0 + br.h);
-  } else {
-    // Верхняя/нижняя полоса. Сравнивать с центром КАНВАСА (H/2) нельзя: поле
-    // боссов занимает лишь верхнюю часть экрана, поэтому обе полосы оказались
-    // бы "верхними" и у нижней кант лёг бы с внешней стороны. Ориентируемся на
-    // центр самой рамки, который передаётся через bossFieldCenterY.
-    const isTopBand = br.y < bossFieldCenterY;
-    const edgeY = isTopBand ? y0 + br.h - 1 : y0 + 1;
-    ctx.moveTo(x0, edgeY);
-    ctx.lineTo(x0 + br.w, edgeY);
-  }
+  ctx.shadowColor = 'rgba(90, 180, 255, 0.85)';
+  ctx.shadowBlur = 8;
   ctx.stroke();
   ctx.shadowBlur = 0;
+  ctx.restore();
 }
 
 function drawBrick(br) {
   ctx.save();
 
-  // Неразрушимая рамка рисуется отдельным путём: градиент вдоль длинной
-  // стороны сегмента + узкий неоновый кант по кромке, обращённой внутрь поля.
-  // Кант рисуется только с внутренней стороны — обводка по всему периметру
-  // сегмента снова проявила бы стыки между соседними кусками рамки.
+  // Неразрушимая рамка теперь не рисуется здесь вообще — см.
+  // drawBossWallMonolithic, вызываемую один раз за кадр в draw(). Отдельные
+  // сегменты по-прежнему нужны в bricks[] для физики (столкновения), но
+  // рисовать их поштучно означало на стыке двух соседних fillRect всегда
+  // оставалась тонкая видимая линия из-за сглаживания краёв и разного
+  // направления градиента — раз и навсегда убрать её можно только рисуя
+  // всю рамку одним непрерывным путём заливки.
   if (br.indestructible) {
-    drawIndestructibleWall(br);
     ctx.restore();
     return;
   }
