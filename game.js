@@ -219,14 +219,87 @@ function buildLevel(lvl) {
 // Возвращают Set ключей "col,row" — какие клетки сетки заполнены кирпичом.
 // Чередуются по номеру уровня, чтобы каждый уровень между боссами выглядел по-разному.
 function choosePattern(lvl, cols, rows) {
-  const variant = lvl % 5; // 5 разных форм, боссы (кратно 5) сюда не попадают
-  switch (variant) {
-    case 1: return diamondPattern(cols, rows);
-    case 2: return pyramidPattern(cols, rows);
-    case 3: return hourglassPattern(cols, rows);
-    case 4: return crossPattern(cols, rows);
-    default: return checkerGapPattern(cols, rows);
+  // Раньше здесь было lvl % 5, но уровни кратные 5 — это боссы, поэтому
+  // ветка default фактически никогда не выполнялась и вместо 5 фигур игрок
+  // видел только 4. Считаем порядковый номер среди НЕбоссовых уровней —
+  // так все фигуры честно чередуются.
+  const patterns = [
+    diamondPattern, pyramidPattern, hourglassPattern, crossPattern,
+    checkerGapPattern, archPattern, zigzagPattern, ringPattern,
+    pillarsPattern, funnelPattern,
+  ];
+  const ordinal = lvl - Math.floor(lvl / 5); // сколько небоссовых уровней пройдено
+  return patterns[ordinal % patterns.length](cols, rows);
+}
+
+// Арка: сплошной свод сверху и две толстые опоры, между ними сквозной проём.
+// Мяч, залетевший внутрь проёма, рикошетит между опорами — маленькая камера
+// в духе боссовых туннелей, но на обычном уровне.
+function archPattern(cols, rows) {
+  const filled = new Set();
+  const cx = (cols - 1) / 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const isRoof = r < 2;
+      const inColumn = Math.abs(c - cx) >= cols * 0.22;
+      if (isRoof || inColumn) filled.add(`${c},${r}`);
+    }
   }
+  return filled;
+}
+
+// Зигзаг: синусоидальная лента поперёк поля. Много косых поверхностей, из-за
+// которых мяч уходит под непредсказуемыми углами.
+function zigzagPattern(cols, rows) {
+  const filled = new Set();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const wave = Math.sin(c * 0.7) * (rows * 0.25) + rows / 2;
+      if (Math.abs(r - wave) <= 1.6) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+// Кольцо: пустота в центре. Пробив стенку, мяч попадает во внутреннюю полость
+// и может долго крушить кольцо изнутри — самый "щедрый" из обычных уровней.
+function ringPattern(cols, rows) {
+  const filled = new Set();
+  const cx = (cols - 1) / 2, cy = (rows - 1) / 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const d = Math.hypot((c - cx) / (cols / 2), (r - cy) / (rows / 2));
+      if (d <= 1.0 && d >= 0.42) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+// Столбы: решётка со сквозными щелями по обеим осям. Мяч проваливается
+// в щели и застревает в них, выбивая длинные вертикальные каналы.
+function pillarsPattern(cols, rows) {
+  const filled = new Set();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (c % 4 === 3 || r % 4 === 3) continue;
+      filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
+}
+
+// Воронка: центр пустой и открыт до самого верха, к краям масса нарастает.
+// Провоцирует лететь в лёгкий центр, где на самом деле нечего разбивать.
+function funnelPattern(cols, rows) {
+  const filled = new Set();
+  const cx = (cols - 1) / 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const norm = Math.abs(c - cx) / (cols / 2);
+      if (r < Math.round(norm * rows * 0.9)) filled.add(`${c},${r}`);
+    }
+  }
+  return filled;
 }
 
 function diamondPattern(cols, rows) {
@@ -256,7 +329,9 @@ function pyramidPattern(cols, rows) {
 function hourglassPattern(cols, rows) {
   const filled = new Set();
   const cx = (cols - 1) / 2;
-  const midRow = (rows - 1) / 2;
+  // Защита от деления на ноль: при rows=1 midRow был бы 0, все сравнения
+  // давали NaN и уровень генерировался полностью пустым (непроходимым).
+  const midRow = Math.max((rows - 1) / 2, 0.5);
   for (let r = 0; r < rows; r++) {
     const distFromMid = Math.abs(r - midRow) / midRow;
     const half = distFromMid * (cols / 2);
@@ -302,10 +377,11 @@ function buildBossLevel(lvl) {
   const fieldH = 280;
   const ch = fieldH / rows;
   const top = 12;
+  bossFieldCenterY = top + fieldH / 2;
   const cx = Math.floor(cols / 2);
   // Позиция ядра зависит от формы: туннелям и диагонали нужен долгий путь
   // (ядро ближе к верху), спирали — простор со всех сторон (ядро в центре).
-  const variant = Math.floor(lvl / 5) % 4;
+  const variant = Math.floor(lvl / 5) % 6;
   const cy = variant === 1 ? Math.floor(rows / 2) : 3;
 
   // Число входов — от 1 до 3, меняется по номеру уровня, как ты просил.
@@ -321,6 +397,13 @@ function buildBossLevel(lvl) {
   } else if (variant === 2) {
     // Туннель под углом — по диагонали от входа к ядру.
     buildDiagonalTunnelMask(corridor, cols, rows, cx, cy, entryCols[0]);
+  } else if (variant === 4) {
+    // Гребёнка: несколько одинаковых на вид шахт, но лишь одна ведёт к ядру,
+    // остальные — тупики. Игрок не знает заранее, какая настоящая.
+    buildCombMask(corridor, cols, rows, cx, cy);
+  } else if (variant === 5) {
+    // Змейка: длинный извилистый путь с разворотами через всё поле.
+    buildSnakeMask(corridor, cols, rows, cx, cy, entryCols[0]);
   } else {
     // Пространство за стеной заполнено целиком — никакого готового пути нет,
     // только точки входа в самой стене. Мяч прогрызает себе дорогу сам, по
@@ -369,6 +452,55 @@ function buildBossLevel(lvl) {
     b.hue = Math.floor(Math.random() * pals.length);
     b.pal = b.isBossCore ? '#ffe14d' : pals[b.hue] || pals[0];
   });
+}
+
+// Гребёнка: пять одинаковых на вид вертикальных шахт, уходящих вглубь массы.
+// Только центральная доходит до ядра, остальные обрываются тупиками на
+// середине. Снаружи все выглядят идентично — игрок узнаёт правду, только
+// загнав туда мяч, и это ровно та фрустрация, которая нужна.
+function buildCombMask(corridor, cols, rows, cx, cy) {
+  const shafts = [4, Math.round(cols * 0.3), cx, Math.round(cols * 0.7), cols - 5];
+  shafts.forEach((sc, i) => {
+    const isTrueShaft = sc === cx;
+    const depth = isTrueShaft ? cy : Math.round(cy + (rows - cy) * 0.45);
+    for (let r = rows - 1; r >= depth; r--) {
+      if (sc >= 1 && sc <= cols - 2) corridor.add(`${sc},${r}`);
+    }
+  });
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      corridor.add(`${cx + dx},${cy + dy}`);
+    }
+  }
+}
+
+// Змейка: путь идёт вверх, разворачивается поперёк всего поля, снова вверх и
+// обратно — длинный маршрут с двумя разворотами. Мяч проходит его целиком,
+// только если сохраняет удачный угол на каждом повороте.
+function buildSnakeMask(corridor, cols, rows, cx, cy, entryCol) {
+  const bandLow = cy + 2;
+  for (let r = rows - 1; r >= bandLow; r--) {
+    corridor.add(`${entryCol},${r}`);
+  }
+  let dir = entryCol < cx ? 1 : -1;
+  let c = entryCol;
+  const farEnd = dir > 0 ? cols - 3 : 2;
+  for (; dir > 0 ? c <= farEnd : c >= farEnd; c += dir) {
+    if (c >= 1 && c <= cols - 2) corridor.add(`${c},${bandLow}`);
+  }
+  c -= dir;
+  for (let r = bandLow; r >= cy; r--) {
+    if (c >= 1 && c <= cols - 2) corridor.add(`${c},${r}`);
+  }
+  dir *= -1;
+  for (; dir > 0 ? c <= cx : c >= cx; c += dir) {
+    if (c >= 1 && c <= cols - 2) corridor.add(`${c},${cy}`);
+  }
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      corridor.add(`${cx + dx},${cy + dy}`);
+    }
+  }
 }
 
 // Выбирает 1-3 точки входа, равномерно распределённые по нижнему краю поля,
@@ -757,8 +889,12 @@ function applyBonus(type) {
       balls.forEach(b => {
         const cur = Math.hypot(b.vx, b.vy);
         if (cur === 0) return;
-        const target = Math.min(maxBallSpeed(), Math.max(baseBallSpeed(), cur / 0.75));
-        const scale = target / cur;
+        // Раньше здесь было cur / 0.75 — то есть слепое умножение текущей
+        // скорости. Если за время действия эффекта игрок успевал сменить
+        // уровень, новый (не замедленный) мяч разгонялся сверх нормы.
+        // Теперь просто нормализуем к базовой скорости — она одинакова
+        // на всех уровнях, поэтому это всегда корректный ориентир.
+        const scale = baseBallSpeed() / cur;
         b.vx *= scale;
         b.vy *= scale;
       });
@@ -1030,7 +1166,10 @@ function update() {
   }
 
   // победа
-  if (state.running && balls.length > 0 && bricks.every(b => !b.alive)) {
+  // ВАЖНО: неразрушимые кирпичи (рамка боссов) не могут быть уничтожены,
+  // поэтому их надо исключать из проверки — иначе boss-уровень невозможно
+  // пройти вообще и игра застревает на нём навсегда.
+  if (state.running && balls.length > 0 && bricks.every(b => !b.alive || b.indestructible)) {
     state.level++;
     levelEl.textContent = state.level;
     updateBestLevel();
@@ -1173,13 +1312,68 @@ function drawHitboxes() {
 }
 
 let liveBrickCountCache = 0;
+// Вертикальный центр поля boss-уровня — нужен отрисовке рамки, чтобы понять,
+// какая её кромка обращена внутрь конструкции (см. drawIndestructibleWall).
+let bossFieldCenterY = H / 2;
+
+// Отрисовка неразрушимой рамки: холодный градиент сталь→индиго поперёк
+// сегмента и тонкий неоновый кант по кромке, обращённой внутрь конструкции.
+// Сторона канта определяется по геометрии самого сегмента (вертикальный он
+// или горизонтальный и с какого края поля стоит), поэтому кант ложится ровной
+// непрерывной линией по внутреннему периметру, не проявляя стыков.
+function drawIndestructibleWall(br) {
+  const x0 = br.x - br.w / 2, y0 = br.y - br.h / 2;
+  const isVertical = br.h > br.w;
+
+  const g = isVertical
+    ? ctx.createLinearGradient(x0, 0, x0 + br.w, 0)
+    : ctx.createLinearGradient(0, y0, 0, y0 + br.h);
+  g.addColorStop(0, '#1b2030');
+  g.addColorStop(0.45, '#2b3550');
+  g.addColorStop(1, '#161a26');
+  ctx.fillStyle = g;
+  ctx.fillRect(x0, y0, br.w, br.h);
+
+  // Неоновый кант — только по внутренней кромке.
+  ctx.strokeStyle = 'rgba(120, 200, 255, 0.85)';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(90, 180, 255, 0.9)';
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  if (isVertical) {
+    // Боковая полоса: внутрь смотрит та вертикальная кромка, что ближе к центру канваса.
+    const edgeX = br.x < W / 2 ? x0 + br.w - 1 : x0 + 1;
+    ctx.moveTo(edgeX, y0);
+    ctx.lineTo(edgeX, y0 + br.h);
+  } else {
+    // Верхняя/нижняя полоса. Сравнивать с центром КАНВАСА (H/2) нельзя: поле
+    // боссов занимает лишь верхнюю часть экрана, поэтому обе полосы оказались
+    // бы "верхними" и у нижней кант лёг бы с внешней стороны. Ориентируемся на
+    // центр самой рамки, который передаётся через bossFieldCenterY.
+    const isTopBand = br.y < bossFieldCenterY;
+    const edgeY = isTopBand ? y0 + br.h - 1 : y0 + 1;
+    ctx.moveTo(x0, edgeY);
+    ctx.lineTo(x0 + br.w, edgeY);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
 
 function drawBrick(br) {
   ctx.save();
-  let col;
+
+  // Неразрушимая рамка рисуется отдельным путём: градиент вдоль длинной
+  // стороны сегмента + узкий неоновый кант по кромке, обращённой внутрь поля.
+  // Кант рисуется только с внутренней стороны — обводка по всему периметру
+  // сегмента снова проявила бы стыки между соседними кусками рамки.
   if (br.indestructible) {
-    col = '#2a2f3d'; // тёмный металлик — визуально явно "непробиваемо"
-  } else if (br.isBossCell) {
+    drawIndestructibleWall(br);
+    ctx.restore();
+    return;
+  }
+
+  let col;
+  if (br.isBossCell) {
     col = br.isBossCore ? '#ffe14d' : br.pal;
   } else {
     const colors = { 1: br.pal, 2: '#ff9a3c', 3: '#ff4dd2' };
@@ -1189,18 +1383,12 @@ function drawBrick(br) {
   // операций canvas, особенно на мобильных. На boss-уровнях ячеек в разы больше,
   // чем на обычных, поэтому порог отдельный — иначе спираль потеряет всё свечение.
   const glowThreshold = br.isBossCell ? 260 : 40;
-  const glowAllowed = !br.indestructible && (liveBrickCountCache <= glowThreshold || br.maxHp >= 2 || br.isBossCore);
+  const glowAllowed = liveBrickCountCache <= glowThreshold || br.maxHp >= 2 || br.isBossCore;
   ctx.shadowColor = col;
   ctx.shadowBlur = glowAllowed ? (br.isBossCore ? 26 : 14) : 0;
   ctx.fillStyle = col;
   ctx.fillRect(br.x - br.w / 2, br.y - br.h / 2, br.w, br.h);
   ctx.shadowBlur = 0;
-  // Неразрушимая рамка — сплошная заливка без обводки и бликов: любая обводка
-  // на отдельных сегментах визуально воссоздаёт "стыки", которых мы избегаем.
-  if (br.indestructible) {
-    ctx.restore();
-    return;
-  }
   // неоновая рамка
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
