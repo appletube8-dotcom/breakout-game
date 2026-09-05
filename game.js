@@ -1396,26 +1396,46 @@ function drawHitboxes() {
 function drawBossWallMonolithic() {
   if (!bossWallGeom) return;
   const { top, fieldBottom, cw, ch, gaps } = bossWallGeom;
+  const fieldH = fieldBottom - top;
+
+  // Путь всей рамки: внешний контур, вырез интерьера и вырезы под входы.
+  function tracePath() {
+    ctx.beginPath();
+    ctx.rect(0, top, W, fieldH);
+    ctx.rect(cw, top + ch, W - 2 * cw, fieldH - 2 * ch);
+    gaps.forEach(g => ctx.rect(g.x0, g.y0, g.x1 - g.x0, g.y1 - g.y0));
+  }
 
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, top, W, fieldBottom - top);
-  ctx.rect(cw, top + ch, W - 2 * cw, (fieldBottom - top) - 2 * ch);
-  gaps.forEach(g => ctx.rect(g.x0, g.y0, g.x1 - g.x0, g.y1 - g.y0));
 
-  const g = ctx.createLinearGradient(0, top, 0, fieldBottom);
-  g.addColorStop(0, '#1b2030');
-  g.addColorStop(0.5, '#2b3550');
-  g.addColorStop(1, '#161a26');
-  ctx.fillStyle = g;
-  // Свечение даёт тень на самой заливке, а НЕ обводка. Раньше здесь был
-  // ctx.stroke() по всему пути — он обводил и прямоугольники-вырезы под
-  // входы, рисуя вокруг каждого входа лишнюю рамку-коробочку. Тень следует
-  // фактической форме залитой фигуры, поэтому у проёмов ничего не появляется.
-  ctx.shadowColor = 'rgba(90, 170, 255, 0.5)';
-  ctx.shadowBlur = 12;
+  // 1. Заливка градиентом по evenodd — цельная фигура без стыков.
+  tracePath();
+  const grad = ctx.createLinearGradient(0, top, 0, fieldBottom);
+  grad.addColorStop(0, '#1b2030');
+  grad.addColorStop(0.5, '#2b3550');
+  grad.addColorStop(1, '#161a26');
+  ctx.fillStyle = grad;
   ctx.fill('evenodd');
+
+  // 2. Неоновый кант. Обводится ТОЛЬКО внешний и внутренний контур —
+  // прямоугольники-вырезы под входы в обводку не попадают, иначе вокруг
+  // каждого входа рисовалась бы лишняя светящаяся коробочка.
+  // Дополнительно ограничиваем вывод областью самой стены: без этого
+  // нижняя грань внутреннего контура прочерчивала бы линию поперёк
+  // открытых проёмов. Линия берётся двойной толщины, потому что внешняя
+  // её половина всё равно срезается границей отсечения.
+  tracePath();
+  ctx.clip('evenodd');
+  ctx.beginPath();
+  ctx.rect(0, top, W, fieldH);
+  ctx.rect(cw, top + ch, W - 2 * cw, fieldH - 2 * ch);
+  ctx.strokeStyle = 'rgba(120, 200, 255, 0.8)';
+  ctx.lineWidth = 4;
+  ctx.shadowColor = 'rgba(90, 180, 255, 0.85)';
+  ctx.shadowBlur = 8;
+  ctx.stroke();
   ctx.shadowBlur = 0;
+
   ctx.restore();
 }
 
