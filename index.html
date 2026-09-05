@@ -16,11 +16,6 @@
     <!-- HUD -->
     <div id="hud">
       <div class="hud-item">
-        <span>Счёт</span>
-        <strong id="score">0</strong>
-      </div>
-
-      <div class="hud-item">
         <span>Уровень</span>
         <strong id="level">1</strong>
       </div>
@@ -31,8 +26,8 @@
       </div>
 
       <div class="hud-item">
-        <span>Рекорд</span>
-        <strong id="best">0</strong>
+        <span>Лучший</span>
+        <strong id="best">1</strong>
       </div>
 
       <button id="muteBtn" type="button">🔊</button>
@@ -211,6 +206,9 @@
       <div class="dev-row">
         <button id="devForceMulti" type="button">⚪ Multi</button>
         <button id="devForceSlow" type="button">🔵 Slow</button>
+      </div>
+      <div class="dev-row">
+        <button id="devForceShrink" type="button">🔴 Shrink</button>
       </div>
       <label class="dev-checkbox">
         <input
